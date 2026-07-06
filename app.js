@@ -1,111 +1,153 @@
-const $ = (s) => document.querySelector(s);
+const state = { view:'dashboard', students:[], lessons:[], planned:[], settings:null };
+const LS_KEY = 'sgencer_lesson_manager_supabase_v1';
+const $ = s => document.querySelector(s);
 const content = $('#content');
-let sb = null;
-let currentView = 'dashboard';
-let state = { students: [], lessons: [], planned: [], user: null };
 
-function toast(msg){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',3500); }
-function money(n){ return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:0}).format(Number(n||0)); }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
-function monthISO(){ return new Date().toISOString().slice(0,7); }
-function dateTR(d){ if(!d) return ''; return new Date(d+'T12:00:00').toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'}); }
-function timeTR(t){ return (t||'').slice(0,5); }
-function esc(x){ return String(x??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function getConfig(){ return { url: localStorage.getItem('slm_supabase_url')||'', key: localStorage.getItem('slm_supabase_anon')||''}; }
-function initSupabase(){ const {url,key}=getConfig(); if(url&&key&&window.supabase){ sb = window.supabase.createClient(url,key); return true;} return false; }
-function showSetup(){ $('#setupPanel').style.display='block'; $('#authPanel').style.display='none'; content.style.display='none'; }
-function showAuth(){ $('#setupPanel').style.display='none'; $('#authPanel').style.display='block'; content.style.display='none'; $('#logoutBtn').style.display='none'; }
-function showApp(){ $('#setupPanel').style.display='none'; $('#authPanel').style.display='none'; content.style.display='block'; $('#logoutBtn').style.display='inline-block'; }
-function setPage(title, sub){ $('#pageTitle').textContent=title; $('#pageSubtitle').textContent=sub; }
-function studentName(id){ return state.students.find(s=>String(s.id)===String(id))?.name || id || ''; }
-function studentById(id){ return state.students.find(s=>String(s.id)===String(id)); }
-function studentFee(s){ return Number(s?.fee ?? s?.hourly_fee ?? 0); }
-function studentSubject(s){ return s?.subject || s?.course || ''; }
+function money(x){ return `${Math.round(Number(x||0)).toLocaleString('tr-TR')} TL`; }
+function today(){ return new Date().toISOString().slice(0,10); }
+function monthKey(d=new Date()){ return d.toISOString().slice(0,7); }
+function fmtDate(s){ if(!s) return ''; const d=new Date(s+'T00:00'); return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',weekday:'short'}); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2800); }
+function getStudent(id){ return state.students.find(s=>String(s.id)===String(id)) || {}; }
+function getFeeStudent(s){ return Number(s.fee || s.hourly_fee || 0); }
+function studentSubject(s){ return s.subject || s.course || ''; }
 
-$('#saveConfigBtn').onclick=()=>{ const url=$('#supabaseUrl').value.trim(); const key=$('#supabaseAnon').value.trim(); if(!url||!key) return toast('URL ve anon key gerekli.'); localStorage.setItem('slm_supabase_url',url); localStorage.setItem('slm_supabase_anon',key); initSupabase(); checkSession(); };
-$('#loginBtn').onclick=async()=>{ const email=$('#emailInput').value.trim(); const password=$('#passwordInput').value; const {data,error}=await sb.auth.signInWithPassword({email,password}); if(error) return toast(error.message); state.user=data.user; await loadAll(); };
-$('#signupBtn').onclick=async()=>{ const email=$('#emailInput').value.trim(); const password=$('#passwordInput').value; const {data,error}=await sb.auth.signUp({email,password}); if(error) return toast(error.message); if(data.user && !data.session) toast('Hesap oluşturuldu. Mail onayı istiyorsa Gmail sekmesinden onayla, sonra giriş yap.'); if(data.session){ state.user=data.user; await loadAll(); } };
-$('#logoutBtn').onclick=async()=>{ await sb.auth.signOut(); state.user=null; showAuth(); };
-$('#refreshBtn').onclick=()=> loadAll();
+function loadSettings(){ try{return JSON.parse(localStorage.getItem(LS_KEY)||'null')}catch{return null} }
+function saveSettings(v){ localStorage.setItem(LS_KEY, JSON.stringify(v)); state.settings=v; }
+function configured(){ state.settings=loadSettings(); return state.settings?.url && state.settings?.key; }
 
-async function checkSession(){ if(!initSupabase()) return showSetup(); const {data}=await sb.auth.getSession(); if(!data.session) return showAuth(); state.user=data.session.user; await loadAll(); }
-async function loadAll(){
-  showApp(); $('#userBox').innerHTML = state.user ? `Giriş: <b>${esc(state.user.email)}</b>` : '';
-  const [students, lessons, planned] = await Promise.all([
-    sb.from('students').select('*').order('name'),
-    sb.from('lessons').select('*').order('lesson_date',{ascending:false}).order('lesson_time',{ascending:false}),
-    sb.from('planned').select('*').order('lesson_date',{ascending:true}).order('lesson_time',{ascending:true})
-  ]);
-  for(const r of [students,lessons,planned]) if(r.error) return toast(r.error.message);
-  state.students=students.data||[]; state.lessons=lessons.data||[]; state.planned=planned.data||[];
-  render(currentView);
+async function api(table, opts={}){
+  const {url,key}=state.settings||{};
+  if(!url || !key) throw new Error('Supabase ayarları eksik');
+  let endpoint = `${url.replace(/\/$/,'')}/rest/v1/${table}`;
+  if(opts.query) endpoint += `?${opts.query}`;
+  const headers = { apikey:key, Authorization:`Bearer ${key}`, 'Content-Type':'application/json', Prefer:'return=representation' };
+  const res = await fetch(endpoint, { method:opts.method||'GET', headers, body:opts.body?JSON.stringify(opts.body):undefined });
+  const text = await res.text();
+  if(!res.ok){ throw new Error(text || res.statusText); }
+  return text ? JSON.parse(text) : null;
 }
 
-document.querySelectorAll('.nav').forEach(btn=>btn.onclick=()=>{ document.querySelectorAll('.nav').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); render(btn.dataset.view); });
-function render(view){ currentView=view; if(view==='dashboard') return renderDashboard(); if(view==='calendar') return renderCalendar(); if(view==='students') return renderStudents(); if(view==='addLesson') return renderAddLesson(); if(view==='lessons') return renderLessons(); if(view==='reports') return renderReports(); if(view==='settings') return renderSettings(); }
+async function loadAll(){
+  if(!configured()){ showSetup(); return; }
+  hideSetup();
+  try{
+    const [students, lessons, planned] = await Promise.all([
+      api('students',''),
+      api('lessons',{query:'select=*&order=lesson_date.desc,lesson_time.desc'}),
+      api('planned',{query:'select=*&order=lesson_date.asc,lesson_time.asc'})
+    ]);
+    state.students = (students||[]).sort((a,b)=>String(a.name).localeCompare(String(b.name),'tr'));
+    state.lessons = lessons||[];
+    state.planned = planned||[];
+    render();
+  }catch(e){ showSetup(); content.innerHTML = `<div class="card pad"><h2>Bağlantı hatası</h2><p class="muted">${escapeHtml(e.message)}</p><p>Supabase bilgilerini kontrol et. Veri gelmiyorsa zip içindeki <b>04_quick_web_access.sql</b> dosyasını SQL Editor'da çalıştır.</p></div>`; }
+}
+
+function showSetup(){ $('#setupCard').classList.remove('hidden'); const s=loadSettings()||{}; $('#setupUrl').value=s.url||''; $('#setupKey').value=s.key||''; }
+function hideSetup(){ $('#setupCard').classList.add('hidden'); }
+$('#saveSetup').onclick = ()=>{ saveSettings({url:$('#setupUrl').value.trim(), key:$('#setupKey').value.trim()}); loadAll(); };
+$('#refreshBtn').onclick = loadAll;
+$('#closeModal').onclick = closeModal;
+$('#modal').addEventListener('click',e=>{ if(e.target.id==='modal') closeModal(); });
+
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m])); }
+function setView(v){ state.view=v; document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===v)); render(); }
+document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$('#addBtn').onclick = ()=>{
+  if(state.view==='students') openStudentForm();
+  else if(state.view==='planned') openPlannedForm();
+  else if(state.view==='lessons') openLessonForm();
+  else if(state.view==='dashboard') openPlannedForm();
+};
+
+function render(){
+  const titles={dashboard:['Dashboard','Bugünkü derslerini ve genel durumunu gör.'],students:['Öğrenciler','Öğrenci bilgilerini yönet.'],planned:['Planlanan','Gelecek dersleri planla ve tamamla.'],lessons:['Dersler','İşlenmiş dersler ve ödeme takibi.'],settings:['Ayarlar','Supabase bağlantı bilgileri.']};
+  $('#pageTitle').textContent=titles[state.view][0]; $('#pageSub').textContent=titles[state.view][1];
+  $('#addBtn').style.display = ['students','planned','lessons','dashboard'].includes(state.view) ? '' : 'none';
+  if(state.view==='dashboard') renderDashboard();
+  if(state.view==='students') renderStudents();
+  if(state.view==='planned') renderPlanned();
+  if(state.view==='lessons') renderLessons();
+  if(state.view==='settings') renderSettings();
+}
 
 function renderDashboard(){
-  setPage('Dashboard','Bugünkü derslerini ve genel durumunu gör.');
-  const today=todayISO(), month=monthISO();
-  const todayPlans=state.planned.filter(p=>p.lesson_date===today && (p.status||'planned')==='planned');
-  const monthLessons=state.lessons.filter(l=>(l.lesson_date||'').startsWith(month));
-  const monthPlans=state.planned.filter(p=>(p.lesson_date||'').startsWith(month));
-  const paid=monthLessons.filter(l=>!!l.paid).reduce((a,l)=>a+Number(l.fee||0),0);
-  const earned=monthLessons.reduce((a,l)=>a+Number(l.fee||0),0);
-  const plannedSum=monthPlans.reduce((a,l)=>a+Number(l.fee||0),0);
-  content.innerHTML=`<div class="cards">
-    <div class="card"><div class="value">${money(plannedSum)}</div><div class="label">Tahmini aylık gelir</div></div>
-    <div class="card"><div class="value">${money(earned)}</div><div class="label">Bugüne kadar hakediş</div></div>
-    <div class="card"><div class="value">${money(paid)}</div><div class="label">Tahsil edilen</div></div>
-    <div class="card"><div class="value">${monthPlans.length}</div><div class="label">Planlanan ders</div></div>
-  </div>
-  <div class="panel"><div class="row" style="justify-content:space-between"><h2>Bugün</h2><button class="primary" onclick="openPlanModal()">+ Yeni Ders</button></div>${tablePlans(todayPlans, true)}</div>
-  <div class="panel"><h2>Son dersler</h2>${tableLessons(state.lessons.slice(0,8))}</div>`;
+  const t=today(), m=monthKey();
+  const todayPlanned = state.planned.filter(p=>p.lesson_date===t && p.status!=='cancelled');
+  const monthLessons = state.lessons.filter(l=>String(l.lesson_date||'').startsWith(m));
+  const revenue = monthLessons.reduce((a,l)=>a+Number(l.fee||0),0);
+  const unpaid = monthLessons.filter(l=>!l.paid).reduce((a,l)=>a+Number(l.fee||0),0);
+  content.innerHTML = `
+    <div class="grid stats">
+      <div class="card stat"><div class="label">Bugün</div><div class="value">${todayPlanned.length}</div><div class="sub">planlanan ders</div></div>
+      <div class="card stat"><div class="label">Bu Ay</div><div class="value">${monthLessons.length}</div><div class="sub">işlenmiş ders</div></div>
+      <div class="card stat"><div class="label">Bu Ay Gelir</div><div class="value">${money(revenue)}</div><div class="sub">toplam ders ücreti</div></div>
+      <div class="card stat"><div class="label">Bekleyen</div><div class="value">${money(unpaid)}</div><div class="sub">ödenmemiş</div></div>
+    </div>
+    <div class="grid two">
+      <div class="card pad"><h2>Bugünkü Plan</h2><div class="list">${todayPlanned.length?todayPlanned.map(planRow).join(''):'<div class="empty">Bugün planlanan ders yok.</div>'}</div></div>
+      <div class="card pad"><h2>Son Dersler</h2><div class="list">${state.lessons.slice(0,6).map(lessonRow).join('') || '<div class="empty">Henüz ders yok.</div>'}</div></div>
+    </div>`;
+}
+function planRow(p){ const s=getStudent(p.student_id); return `<div class="row"><div class="rowMain"><span class="dot" style="background:${s.color||'#38bdf8'}"></span><div><b>${escapeHtml(s.name||'Öğrenci')}</b><div class="muted small">${fmtDate(p.lesson_date)} ${p.lesson_time||''} · ${money(p.fee||getFeeStudent(s))}</div></div></div><span class="badge ${p.status==='done'?'green':'orange'}">${p.status||'planned'}</span></div>`; }
+function lessonRow(l){ const s=getStudent(l.student_id); return `<div class="row"><div class="rowMain"><span class="dot" style="background:${s.color||'#38bdf8'}"></span><div><b>${escapeHtml(s.name||'Öğrenci')}</b><div class="muted small">${fmtDate(l.lesson_date)} ${l.lesson_time||''} · ${escapeHtml(l.topic||'')}</div></div></div><div><span class="money">${money(l.fee)}</span> <span class="badge ${l.paid?'green':'red'}">${l.paid?'Ödendi':'Bekliyor'}</span></div></div>`; }
+
+function renderStudents(){
+  content.innerHTML = `<div class="filters"><input id="studentSearch" placeholder="Öğrenci ara..."></div><div class="tableWrap"><table><thead><tr><th>Ad</th><th>Okul</th><th>Ders</th><th>Ücret</th><th>Veli</th><th>Telefon</th><th>İşlem</th></tr></thead><tbody id="studentsBody"></tbody></table></div>`;
+  const draw=()=>{ const q=($('#studentSearch').value||'').toLowerCase(); $('#studentsBody').innerHTML = state.students.filter(s=>JSON.stringify(s).toLowerCase().includes(q)).map(s=>`
+    <tr><td><b>${escapeHtml(s.name)}</b></td><td>${escapeHtml(s.school||'')}</td><td>${escapeHtml(studentSubject(s))}</td><td>${money(getFeeStudent(s))}</td><td>${escapeHtml(s.parent_name||'')}</td><td>${escapeHtml(s.phone||'')}</td><td><div class="actions"><button class="ghost" onclick="openStudentForm(${s.id})">Düzenle</button></div></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Öğrenci yok.</td></tr>'; };
+  $('#studentSearch').oninput=draw; draw();
 }
 
-function renderStudents(){ setPage('Öğrenciler','Öğrenci ekle, düzenle ve takip et.'); content.innerHTML=`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Öğrenci Listesi</h2><button class="primary" onclick="openStudentModal()">+ Öğrenci Ekle</button></div>${tableStudents(state.students)}</div>`; }
-function renderCalendar(){
-  setPage('Takvim','Haftalık plan.');
-  const base = new Date(); const monday = new Date(base); monday.setDate(base.getDate()-((base.getDay()+6)%7));
-  const days = Array.from({length:7},(_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return d.toISOString().slice(0,10); });
-  content.innerHTML=`<div class="panel"><div class="row" style="justify-content:space-between"><h2>Bu Hafta</h2><button class="primary" onclick="openPlanModal()">+ Yeni Plan</button></div><div class="week">${days.map(d=>`<div class="day"><h3>${dateTR(d)}</h3>${dayEvents(d)}</div>`).join('')}</div></div>`;
+function renderPlanned(){
+  content.innerHTML = `<div class="filters"><select id="planFilter"><option value="future">Gelecek</option><option value="all">Tümü</option><option value="done">Tamamlanan</option></select></div><div class="tableWrap"><table><thead><tr><th>Tarih</th><th>Saat</th><th>Öğrenci</th><th>Ücret</th><th>Not</th><th>Durum</th><th>İşlem</th></tr></thead><tbody id="plannedBody"></tbody></table></div>`;
+  const draw=()=>{ const f=$('#planFilter').value; let arr=[...state.planned]; if(f==='future') arr=arr.filter(p=>p.status!=='done' && p.status!=='cancelled'); if(f==='done') arr=arr.filter(p=>p.status==='done'); $('#plannedBody').innerHTML = arr.map(p=>{ const s=getStudent(p.student_id); return `<tr><td>${fmtDate(p.lesson_date)}</td><td>${p.lesson_time||''}</td><td><b>${escapeHtml(s.name||'')}</b></td><td>${money(p.fee||getFeeStudent(s))}</td><td>${escapeHtml(p.note||'')}</td><td><span class="badge ${p.status==='done'?'green':'orange'}">${p.status||'planned'}</span></td><td><div class="actions">${p.status!=='done'?`<button class="ok" onclick="completePlanned(${p.id})">Dersi işle</button>`:''}<button class="ghost" onclick="openPlannedForm(${p.id})">Düzenle</button><button class="danger" onclick="deleteRow('planned',${p.id})">Sil</button></div></td></tr>` }).join('') || '<tr><td colspan="7" class="empty">Plan yok.</td></tr>'; };
+  $('#planFilter').onchange=draw; draw();
 }
-function dayEvents(d){
-  const plans=state.planned.filter(p=>p.lesson_date===d).map(p=>`<div class="event ${p.status==='done'?'done':''}"><b>${timeTR(p.lesson_time)}</b> ${esc(studentName(p.student_id))}<br>${money(p.fee)} ${p.status==='planned'?`<br><button class="ghost" onclick="completePlan(${p.id})">Yapıldı</button>`:''}</div>`);
-  const lessons=state.lessons.filter(l=>l.lesson_date===d && !state.planned.some(p=>String(p.materialized_lesson_id)===String(l.id))).map(l=>`<div class="event done"><b>${timeTR(l.lesson_time)}</b> ${esc(studentName(l.student_id))}<br>${esc(l.topic||'Ders')} · ${money(l.fee)}</div>`);
-  return [...plans,...lessons].join('') || '<span style="color:var(--muted);font-size:12px">Ders yok</span>';
-}
-function renderAddLesson(){
-  setPage('Ders Ekle','İşlenmiş dersi hemen kaydet.');
-  content.innerHTML=`<div class="panel"><h2>Ders Kaydet</h2>${lessonForm()}</div>`;
-  fillStudentSelect('#lessonStudent'); $('#lessonStudent').onchange=()=>{ const s=studentById($('#lessonStudent').value); $('#lessonFee').value=studentFee(s)||''; };
-}
+
 function renderLessons(){
-  setPage('Dersler','İşlenmiş ders kayıtları.'); const month=monthISO();
-  content.innerHTML=`<div class="panel"><div class="row gap"><label>Ay<input id="lessonMonth" value="${month}"></label><button class="ghost" onclick="renderLessonsFiltered()">Filtrele</button><button class="primary" onclick="openPlanModal()">+ Planla</button></div><div id="lessonsList" style="margin-top:16px"></div></div>`; renderLessonsFiltered();
+  content.innerHTML = `<div class="filters"><input id="lessonMonth" type="month" value="${monthKey()}"><select id="lessonStudent"><option value="">Tüm öğrenciler</option>${state.students.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="tableWrap"><table><thead><tr><th>Tarih</th><th>Saat</th><th>Öğrenci</th><th>Konu</th><th>Ücret</th><th>Ödeme</th><th>İşlem</th></tr></thead><tbody id="lessonsBody"></tbody></table></div>`;
+  const draw=()=>{ const mo=$('#lessonMonth').value, sid=$('#lessonStudent').value; let arr=state.lessons.filter(l=>(!mo || String(l.lesson_date).startsWith(mo)) && (!sid || String(l.student_id)===sid)); $('#lessonsBody').innerHTML = arr.map(l=>{ const s=getStudent(l.student_id); return `<tr><td>${fmtDate(l.lesson_date)}</td><td>${l.lesson_time||''}</td><td><b>${escapeHtml(s.name||'')}</b></td><td>${escapeHtml(l.topic||'')}</td><td>${money(l.fee)}</td><td><button class="${l.paid?'ok':'danger'}" onclick="togglePaid(${l.id},${!l.paid})">${l.paid?'Ödendi':'Bekliyor'}</button></td><td><div class="actions"><button class="ghost" onclick="openLessonForm(${l.id})">Düzenle</button><button class="danger" onclick="deleteRow('lessons',${l.id})">Sil</button></div></td></tr>` }).join('') || '<tr><td colspan="7" class="empty">Ders yok.</td></tr>'; };
+  $('#lessonMonth').onchange=draw; $('#lessonStudent').onchange=draw; draw();
 }
-window.renderLessonsFiltered=()=>{ const m=$('#lessonMonth')?.value || monthISO(); const rows=state.lessons.filter(l=>(l.lesson_date||'').startsWith(m)); $('#lessonsList').innerHTML = summaryRows(rows) + tableLessons(rows); };
-function renderReports(){
-  setPage('Raporlar','Aylık gelir ve ödeme özeti.'); const month=monthISO();
-  content.innerHTML=`<div class="panel"><div class="row gap"><label>Ay<input id="reportMonth" value="${month}"></label><button class="ghost" onclick="renderReportFiltered()">Filtrele</button><button class="primary" onclick="exportCSV()">CSV Aktar</button></div><div id="reportList" style="margin-top:16px"></div></div>`; renderReportFiltered();
-}
-window.renderReportFiltered=()=>{ const m=$('#reportMonth')?.value || monthISO(); const rows=state.lessons.filter(l=>(l.lesson_date||'').startsWith(m)); $('#reportList').innerHTML = summaryRows(rows)+tableLessons(rows); };
-function renderSettings(){ const cfg=getConfig(); setPage('Ayarlar','Bağlantı ve bakım.'); content.innerHTML=`<div class="panel"><h2>Supabase Bağlantısı</h2><label>URL<input id="setUrl" value="${esc(cfg.url)}"></label><br><label>Anon key<input id="setKey" type="password" value="${esc(cfg.key)}"></label><br><button class="primary" onclick="saveSettings()">Kaydet</button> <button class="ghost danger" onclick="clearConfig()">Bağlantıyı Sıfırla</button></div>`; }
 
-function summaryRows(rows){ const total=rows.reduce((a,l)=>a+Number(l.fee||0),0), paid=rows.filter(l=>l.paid).reduce((a,l)=>a+Number(l.fee||0),0); return `<div class="cards"><div class="card"><div class="value">${rows.length}</div><div class="label">Ders</div></div><div class="card"><div class="value">${money(total)}</div><div class="label">Toplam</div></div><div class="card"><div class="value">${money(paid)}</div><div class="label">Ödenen</div></div><div class="card"><div class="value">${money(total-paid)}</div><div class="label">Bekleyen</div></div></div>`; }
-function tableStudents(rows){ if(!rows.length) return '<p>Kayıt yok.</p>'; return `<table class="table"><thead><tr><th>Ad</th><th>Okul</th><th>Ders</th><th>Ücret</th><th>Veli</th><th>Telefon</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.school)}</td><td>${esc(studentSubject(s))}</td><td>${money(studentFee(s))}</td><td>${esc(s.parent_name)}</td><td>${esc(s.phone)}</td><td><button class="ghost" onclick='openStudentModal(${JSON.stringify(s)})'>Düzenle</button></td></tr>`).join('')}</tbody></table>`; }
-function tablePlans(rows, actions=false){ if(!rows.length) return '<p>Kayıt yok.</p>'; return `<table class="table"><thead><tr><th>Tarih</th><th>Saat</th><th>Öğrenci</th><th>Ücret</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr><td>${dateTR(p.lesson_date)}</td><td>${timeTR(p.lesson_time)}</td><td><b>${esc(studentName(p.student_id))}</b></td><td>${money(p.fee)}</td><td><span class="badge">${esc(p.status||'planned')}</span></td><td>${(actions || p.status==='planned')?`<button class="ghost" onclick="completePlan(${p.id})">Yapıldı</button>`:''}</td></tr>`).join('')}</tbody></table>`; }
-function tableLessons(rows){ if(!rows.length) return '<p>Kayıt yok.</p>'; return `<table class="table"><thead><tr><th>Tarih</th><th>Saat</th><th>Öğrenci</th><th>Konu</th><th>Tutar</th><th>Ödeme</th><th></th></tr></thead><tbody>${rows.map(l=>`<tr><td>${dateTR(l.lesson_date)}</td><td>${timeTR(l.lesson_time)}</td><td><b>${esc(studentName(l.student_id))}</b></td><td>${esc(l.topic||'')}</td><td>${money(l.fee)}</td><td><span class="badge ${l.paid?'paid':'unpaid'}">${l.paid?'Ödendi':'Bekliyor'}</span></td><td><button class="ghost" onclick='openLessonModal(${JSON.stringify(l)})'>Düzenle</button></td></tr>`).join('')}</tbody></table>`; }
+function renderSettings(){ const s=state.settings||{}; content.innerHTML=`<div class="card pad"><h2>Supabase Bağlantısı</h2><p class="muted">Bilgiler bu tarayıcıda saklanır.</p><div class="setupGrid"><label>Project URL<input id="setUrl" value="${escapeHtml(s.url||'')}"></label><label>Anon public key<input id="setKey" value="${escapeHtml(s.key||'')}"></label></div><button class="primary" onclick="saveSettings({url:document.querySelector('#setUrl').value.trim(),key:document.querySelector('#setKey').value.trim()}); loadAll(); toast('Kaydedildi')">Kaydet</button></div>`; }
 
-function fillStudentSelect(sel, val=''){ const el=$(sel); el.innerHTML=state.students.map(s=>`<option value="${s.id}" ${String(s.id)===String(val)?'selected':''}>${esc(s.name)}</option>`).join(''); }
-function lessonForm(l={}){ return `<div class="grid three"><label>Öğrenci<select id="lessonStudent"></select></label><label>Tarih<input id="lessonDate" type="date" value="${l.lesson_date||todayISO()}"></label><label>Saat<input id="lessonTime" type="time" value="${timeTR(l.lesson_time)||'18:00'}"></label><label>Konu<input id="lessonTopic" value="${esc(l.topic||'')}"></label><label>Tutar<input id="lessonFee" type="number" value="${l.fee||''}"></label><label>Ödeme<select id="lessonPaid"><option value="false">Bekliyor</option><option value="true" ${l.paid?'selected':''}>Ödendi</option></select></label></div><br><label>Not<textarea id="lessonNotes">${esc(l.notes||'')}</textarea></label><br><button class="primary" onclick="saveLesson(${l.id||''})">Dersi Kaydet</button>`; }
-window.saveLesson=async(id)=>{ const sid=Number($('#lessonStudent').value); const payload={student_id:sid,lesson_date:$('#lessonDate').value,lesson_time:$('#lessonTime').value,duration_min:90,duration:90,topic:$('#lessonTopic').value.trim(),fee:Number($('#lessonFee').value||0),paid:$('#lessonPaid').value==='true',notes:$('#lessonNotes').value.trim()}; const res=id? await sb.from('lessons').update(payload).eq('id',id): await sb.from('lessons').insert(payload); if(res.error) return toast(res.error.message); await loadAll(); toast('Ders kaydedildi.'); };
-window.openLessonModal=(l)=>{ const el=document.createElement('div'); el.className='modal-backdrop'; el.innerHTML=`<div class="modal"><h2>Dersi Düzenle</h2>${lessonForm(l)}<br><button class="ghost" id="closeModal">Kapat</button></div>`; document.body.appendChild(el); fillStudentSelect('#lessonStudent', l.student_id); $('#closeModal').onclick=()=>el.remove(); const old=window.saveLesson; window.saveLesson=async(id)=>{ await old(id); el.remove(); window.saveLesson=old; }; };
-window.openStudentModal=(s={})=>{ const el=document.createElement('div'); el.className='modal-backdrop'; el.innerHTML=`<div class="modal"><h2>${s.id?'Öğrenciyi Düzenle':'Öğrenci Ekle'}</h2><div class="grid two"><label>Ad<input id="mName" value="${esc(s.name||'')}"></label><label>Okul<input id="mSchool" value="${esc(s.school||'')}"></label><label>Ders<input id="mSubject" value="${esc(studentSubject(s))}"></label><label>90 dk Ücreti<input id="mFee" type="number" value="${studentFee(s)||''}"></label><label>Veli<input id="mParent" value="${esc(s.parent_name||'')}"></label><label>Telefon<input id="mPhone" value="${esc(s.phone||'')}"></label><label>E-posta<input id="mEmail" value="${esc(s.email||'')}"></label><label>Aktif<select id="mActive"><option value="true">Aktif</option><option value="false" ${s.active===false?'selected':''}>Pasif</option></select></label></div><br><label>Not<textarea id="mNotes">${esc(s.notes||'')}</textarea></label><br><div class="row gap"><button class="primary" id="mSave">Kaydet</button><button class="ghost" id="mClose">Kapat</button></div></div>`; document.body.appendChild(el); $('#mClose').onclick=()=>el.remove(); $('#mSave').onclick=async()=>{ const fee=Number($('#mFee').value||0); const payload={name:$('#mName').value.trim(),school:$('#mSchool').value.trim(),subject:$('#mSubject').value.trim(),course:$('#mSubject').value.trim(),fee,hourly_fee:fee,parent_name:$('#mParent').value.trim(),phone:$('#mPhone').value.trim(),email:$('#mEmail').value.trim(),active:$('#mActive').value==='true',notes:$('#mNotes').value.trim()}; const res=s.id? await sb.from('students').update(payload).eq('id',s.id): await sb.from('students').insert(payload); if(res.error) return toast(res.error.message); el.remove(); await loadAll(); toast('Öğrenci kaydedildi.'); }; };
-window.openPlanModal=()=>{ const el=document.createElement('div'); el.className='modal-backdrop'; el.innerHTML=`<div class="modal"><h2>Yeni Planlanan Ders</h2><div class="grid three"><label>Öğrenci<select id="pStudent"></select></label><label>Tarih<input id="pDate" type="date" value="${todayISO()}"></label><label>Saat<input id="pTime" type="time" value="18:00"></label><label>Tutar<input id="pFee" type="number"></label><label>Not<input id="pNote"></label><label>Durum<select id="pStatus"><option value="planned">Planlandı</option><option value="done">Yapıldı</option></select></label></div><br><div class="row gap"><button class="primary" id="pSave">Kaydet</button><button class="ghost" id="pClose">Kapat</button></div></div>`; document.body.appendChild(el); fillStudentSelect('#pStudent'); $('#pStudent').onchange=()=>{ $('#pFee').value=studentFee(studentById($('#pStudent').value))||''; }; $('#pStudent').onchange(); $('#pClose').onclick=()=>el.remove(); $('#pSave').onclick=async()=>{ const payload={student_id:Number($('#pStudent').value),lesson_date:$('#pDate').value,lesson_time:$('#pTime').value,fee:Number($('#pFee').value||0),note:$('#pNote').value.trim(),status:$('#pStatus').value,recurring:false,repeat_rule:'none',weekday:new Date($('#pDate').value+'T12:00:00').getDay()===0?6:new Date($('#pDate').value+'T12:00:00').getDay()-1}; const res=await sb.from('planned').insert(payload); if(res.error) return toast(res.error.message); el.remove(); await loadAll(); toast('Plan kaydedildi.'); }; };
-window.completePlan=async(id)=>{ const p=state.planned.find(x=>String(x.id)===String(id)); if(!p) return; const lesson={student_id:p.student_id,lesson_date:p.lesson_date,lesson_time:p.lesson_time,duration_min:90,duration:90,topic:p.note||'',fee:Number(p.fee||0),paid:false,notes:p.note||'',planned_id:p.id}; const ins=await sb.from('lessons').insert(lesson).select().single(); if(ins.error) return toast(ins.error.message); const upd=await sb.from('planned').update({status:'done',materialized_lesson_id:ins.data.id,actual_lesson_id:ins.data.id}).eq('id',p.id); if(upd.error) return toast(upd.error.message); await loadAll(); toast('Ders yapıldı olarak işlendi.'); };
-window.saveSettings=()=>{ localStorage.setItem('slm_supabase_url',$('#setUrl').value.trim()); localStorage.setItem('slm_supabase_anon',$('#setKey').value.trim()); toast('Kaydedildi.'); location.reload(); };
-window.clearConfig=()=>{ localStorage.removeItem('slm_supabase_url'); localStorage.removeItem('slm_supabase_anon'); location.reload(); };
-window.exportCSV=()=>{ const m=$('#reportMonth')?.value || monthISO(); const rows=state.lessons.filter(l=>(l.lesson_date||'').startsWith(m)); const csv=[['Tarih','Saat','Öğrenci','Konu','Tutar','Ödeme','Not'],...rows.map(l=>[l.lesson_date,l.lesson_time,studentName(l.student_id),l.topic,l.fee,l.paid?'Ödendi':'Bekliyor',l.notes])].map(r=>r.map(x=>`"${String(x??'').replaceAll('"','""')}"`).join(',')).join('\n'); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download=`ders_raporu_${m}.csv`; a.click(); };
+function modal(title, html, onSubmit){ $('#modalTitle').textContent=title; $('#modalForm').innerHTML=html; $('#modal').classList.remove('hidden'); $('#modalForm').onsubmit=async e=>{ e.preventDefault(); await onSubmit(new FormData(e.target)); closeModal(); await loadAll(); }; }
+function closeModal(){ $('#modal').classList.add('hidden'); $('#modalForm').innerHTML=''; }
+function studentOptions(selected=''){ return state.students.map(s=>`<option value="${s.id}" ${String(selected)===String(s.id)?'selected':''}>${escapeHtml(s.name)}</option>`).join(''); }
 
-checkSession();
+window.openStudentForm = (id)=>{ const s=id?getStudent(id):{}; modal(id?'Öğrenci Düzenle':'Yeni Öğrenci', `
+  <label>Ad Soyad<input name="name" required value="${escapeHtml(s.name||'')}"></label><label>Okul<input name="school" value="${escapeHtml(s.school||'')}"></label>
+  <label>Ders<input name="subject" value="${escapeHtml(studentSubject(s)||'')}"></label><label>Ücret<input name="fee" type="number" value="${getFeeStudent(s)||''}"></label>
+  <label>Veli<input name="parent_name" value="${escapeHtml(s.parent_name||'')}"></label><label>Telefon<input name="phone" value="${escapeHtml(s.phone||'')}"></label>
+  <label>E-posta<input name="email" value="${escapeHtml(s.email||'')}"></label><label>Renk<input name="color" type="color" value="${s.color||'#2563eb'}"></label>
+  <label class="full">Notlar<textarea name="notes">${escapeHtml(s.notes||'')}</textarea></label><div class="formFooter"><button class="ghost" type="button" onclick="closeModal()">Vazgeç</button><button class="primary">Kaydet</button></div>`, async fd=>{
+    const body=Object.fromEntries(fd.entries()); body.fee=Number(body.fee||0); body.hourly_fee=body.fee; body.course=body.subject; body.active=true;
+    if(id) await api('students',{method:'PATCH',query:`id=eq.${id}`,body}); else await api('students',{method:'POST',body}); toast('Öğrenci kaydedildi');
+  }); };
+
+window.openPlannedForm = (id)=>{ const p=id?state.planned.find(x=>x.id===id):{lesson_date:today(),lesson_time:'19:30'}; modal(id?'Plan Düzenle':'Yeni Plan', `
+  <label>Öğrenci<select name="student_id" required>${studentOptions(p.student_id)}</select></label><label>Tarih<input name="lesson_date" type="date" required value="${p.lesson_date||today()}"></label>
+  <label>Saat<input name="lesson_time" type="time" required value="${p.lesson_time||'19:30'}"></label><label>Ücret<input name="fee" type="number" value="${p.fee||''}"></label>
+  <label class="full">Not<textarea name="note">${escapeHtml(p.note||'')}</textarea></label><div class="formFooter"><button class="ghost" type="button" onclick="closeModal()">Vazgeç</button><button class="primary">Kaydet</button></div>`, async fd=>{
+    const body=Object.fromEntries(fd.entries()); body.student_id=Number(body.student_id); body.fee=Number(body.fee||getFeeStudent(getStudent(body.student_id))||0); body.status=body.status||'planned';
+    if(id) await api('planned',{method:'PATCH',query:`id=eq.${id}`,body}); else await api('planned',{method:'POST',body}); toast('Plan kaydedildi');
+  }); };
+
+window.openLessonForm = (id)=>{ const l=id?state.lessons.find(x=>x.id===id):{lesson_date:today(),lesson_time:'19:30',duration_min:90}; modal(id?'Ders Düzenle':'Yeni Ders', `
+  <label>Öğrenci<select name="student_id" required>${studentOptions(l.student_id)}</select></label><label>Tarih<input name="lesson_date" type="date" required value="${l.lesson_date||today()}"></label>
+  <label>Saat<input name="lesson_time" type="time" required value="${l.lesson_time||'19:30'}"></label><label>Süre<input name="duration_min" type="number" value="${l.duration_min||l.duration||90}"></label>
+  <label>Konu<input name="topic" value="${escapeHtml(l.topic||'')}"></label><label>Ücret<input name="fee" type="number" value="${l.fee||''}"></label>
+  <label>Ödendi mi?<select name="paid"><option value="false" ${!l.paid?'selected':''}>Hayır</option><option value="true" ${l.paid?'selected':''}>Evet</option></select></label>
+  <label class="full">Notlar<textarea name="notes">${escapeHtml(l.notes||'')}</textarea></label><div class="formFooter"><button class="ghost" type="button" onclick="closeModal()">Vazgeç</button><button class="primary">Kaydet</button></div>`, async fd=>{
+    const body=Object.fromEntries(fd.entries()); body.student_id=Number(body.student_id); body.fee=Number(body.fee||getFeeStudent(getStudent(body.student_id))||0); body.duration_min=Number(body.duration_min||90); body.duration=body.duration_min; body.paid=body.paid==='true';
+    if(id) await api('lessons',{method:'PATCH',query:`id=eq.${id}`,body}); else await api('lessons',{method:'POST',body}); toast('Ders kaydedildi');
+  }); };
+
+window.completePlanned = async (id)=>{ const p=state.planned.find(x=>x.id===id); if(!p) return; const s=getStudent(p.student_id); const lesson = await api('lessons',{method:'POST',body:{student_id:p.student_id, lesson_date:p.lesson_date, lesson_time:p.lesson_time, duration:90, duration_min:90, topic:'', fee:Number(p.fee||getFeeStudent(s)||0), paid:false, notes:p.note||'', planned_id:p.id}}); const newId=Array.isArray(lesson)&&lesson[0]?.id; await api('planned',{method:'PATCH',query:`id=eq.${id}`,body:{status:'done', materialized_lesson_id:newId||null, actual_lesson_id:newId||null}}); toast('Ders işlendi'); await loadAll(); };
+window.togglePaid = async (id, val)=>{ await api('lessons',{method:'PATCH',query:`id=eq.${id}`,body:{paid:val}}); toast(val?'Ödendi işaretlendi':'Bekliyor işaretlendi'); await loadAll(); };
+window.deleteRow = async (table,id)=>{ if(!confirm('Silinsin mi?')) return; await api(table,{method:'DELETE',query:`id=eq.${id}`}); toast('Silindi'); await loadAll(); };
+
+loadAll();

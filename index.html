@@ -1,44 +1,57 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>S.Gencer Ders Takip</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>S.Gencer Ders Takip Web</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <div id="app">
     <aside class="sidebar">
-      <div class="brand"><div class="logo">S</div><div><b>S.Gencer</b><span>Ders Takip vWeb</span></div></div>
-      <button class="nav active" data-view="dashboard">📊 Dashboard</button>
-      <button class="nav" data-view="calendar">📅 Takvim</button>
-      <button class="nav" data-view="students">👨‍🎓 Öğrenciler</button>
-      <button class="nav" data-view="addLesson">➕ Ders Ekle</button>
-      <button class="nav" data-view="lessons">📚 Dersler</button>
-      <button class="nav" data-view="reports">💰 Raporlar</button>
-      <button class="nav" data-view="settings">⚙️ Ayarlar</button>
-      <div class="sidebar-footer" id="userBox"></div>
+      <div class="brand"><div class="logo">S</div><div><b>S.Gencer</b><span>Ders Takip</span></div></div>
+      <button class="nav active" data-view="dashboard">Dashboard</button>
+      <button class="nav" data-view="students">Öğrenciler</button>
+      <button class="nav" data-view="planned">Planlanan</button>
+      <button class="nav" data-view="lessons">Dersler</button>
+      <button class="nav" data-view="settings">Ayarlar</button>
     </aside>
+
     <main class="main">
       <header class="topbar">
-        <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">Derslerini ve ödemeleri takip et.</p></div>
-        <div class="top-actions"><button class="ghost" id="refreshBtn">Yenile</button><button class="danger ghost" id="logoutBtn" style="display:none">Çıkış</button></div>
+        <div>
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="pageSub">Derslerini ve genel durumu gör.</p>
+        </div>
+        <div class="topActions">
+          <button id="refreshBtn" class="ghost">Yenile</button>
+          <button id="addBtn" class="primary">Yeni</button>
+        </div>
       </header>
-      <section class="panel" id="setupPanel">
-        <h2>İlk kurulum</h2><p>Supabase <b>Project URL</b> ve <b>anon public key</b> gir. Database şifresi girme.</p>
-        <div class="grid two"><label>Supabase Project URL<input id="supabaseUrl" placeholder="https://xxxx.supabase.co"></label><label>Supabase anon public key<input id="supabaseAnon" placeholder="eyJ..." type="password"></label></div>
-        <button class="primary" id="saveConfigBtn">Kaydet ve Devam Et</button>
+
+      <section id="setupCard" class="setup card hidden">
+        <h2>İlk kurulum</h2>
+        <p>Supabase bilgilerini bir kez gir. Bunlar sadece bu tarayıcıda saklanır. <b>Database password girme.</b></p>
+        <div class="setupGrid">
+          <label>Supabase Project URL<input id="setupUrl" placeholder="https://xxxxx.supabase.co"></label>
+          <label>Supabase anon public key<input id="setupKey" placeholder="eyJ..."></label>
+        </div>
+        <button id="saveSetup" class="primary">Kaydet ve Devam Et</button>
+        <p class="muted small">Not: Eğer veriler gelmezse Supabase SQL Editor'da zip içindeki <b>04_quick_web_access.sql</b> dosyasını çalıştır.</p>
       </section>
-      <section class="panel" id="authPanel" style="display:none">
-        <h2>Giriş</h2><p>İlk kullanımda e-posta ve şifre yazıp <b>Hesap Oluştur</b> de. Sonra aynı bilgilerle giriş yap.</p>
-        <div class="grid two"><label>E-posta<input id="emailInput" type="email"></label><label>Şifre<input id="passwordInput" type="password"></label></div>
-        <div class="row gap"><button class="primary" id="loginBtn">Giriş Yap</button><button class="ghost" id="signupBtn">Hesap Oluştur</button></div>
-      </section>
-      <section id="content" style="display:none"></section>
+
+      <section id="content"></section>
     </main>
   </div>
-  <div class="toast" id="toast"></div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><h2 id="modalTitle"></h2><button id="closeModal" class="iconBtn">×</button></div>
+      <form id="modalForm" class="form"></form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
   <script src="app.js"></script>
 </body>
 </html>
