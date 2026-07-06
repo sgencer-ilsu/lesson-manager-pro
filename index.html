@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Serdar Lesson Manager Pro</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">S</div>
+        <div><b>Lesson Manager</b><span>Pro</span></div>
+      </div>
+      <button class="nav active" data-view="dashboard">📊 Dashboard</button>
+      <button class="nav" data-view="students">👨‍🎓 Öğrenciler</button>
+      <button class="nav" data-view="planned">📅 Planlanan</button>
+      <button class="nav" data-view="lessons">📚 Dersler</button>
+      <button class="nav" data-view="settings">⚙️ Ayarlar</button>
+      <div class="sidebar-footer" id="userBox"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="pageSubtitle">Bugünkü derslerini ve genel durumunu gör.</p>
+        </div>
+        <div class="top-actions">
+          <button class="ghost" id="refreshBtn">Yenile</button>
+          <button class="danger ghost" id="logoutBtn" style="display:none">Çıkış</button>
+        </div>
+      </header>
+
+      <section class="panel" id="setupPanel">
+        <h2>İlk kurulum</h2>
+        <p>Supabase bilgilerini bir kez gir. Bunlar tarayıcıda saklanır. <b>Anon public key</b> herkese açık kullanıma uygundur; database password girme.</p>
+        <div class="grid two">
+          <label>Supabase Project URL<input id="supabaseUrl" placeholder="https://xxxx.supabase.co"></label>
+          <label>Supabase anon public key<input id="supabaseAnon" placeholder="eyJ..." type="password"></label>
+        </div>
+        <button class="primary" id="saveConfigBtn">Kaydet ve Devam Et</button>
+      </section>
+
+      <section class="panel" id="authPanel" style="display:none">
+        <h2>Giriş</h2>
+        <p>İlk kez kullanacaksan e-posta ve şifre yazıp <b>Hesap oluştur</b> de. Sonra aynı bilgilerle giriş yaparsın.</p>
+        <div class="grid two">
+          <label>E-posta<input id="emailInput" type="email" placeholder="serdar@..."></label>
+          <label>Şifre<input id="passwordInput" type="password" placeholder="En az 6 karakter"></label>
+        </div>
+        <div class="row gap">
+          <button class="primary" id="loginBtn">Giriş Yap</button>
+          <button class="ghost" id="signupBtn">Hesap Oluştur</button>
+        </div>
+      </section>
+
+      <section id="content" style="display:none"></section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
