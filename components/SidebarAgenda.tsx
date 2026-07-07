@@ -82,7 +82,7 @@ export default function SidebarAgenda() {
                 </div>
               )}
               <div className="flex gap-2.5 px-2 py-2.5">
-                <div className="shrink-0 w-9 flex flex-col items-center">
+                <div className="shrink-0 w-10 flex flex-col items-center text-center">
                   <div
                     className={`w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold ${
                       g.isToday ? "bg-accent text-white" : "text-[#8b98b3]"
@@ -90,9 +90,8 @@ export default function SidebarAgenda() {
                   >
                     {g.day}
                   </div>
-                  <div className="text-[9px] text-muted tracking-wide mt-0.5">
-                    {g.weekday}, {g.month}
-                  </div>
+                  <div className="text-[9px] text-muted font-semibold tracking-wide mt-1 leading-tight whitespace-nowrap">{g.month}</div>
+                  <div className="text-[9px] text-muted/70 leading-tight whitespace-nowrap">{g.weekday}</div>
                 </div>
                 <div className="flex-1 min-w-0 space-y-1.5 pt-0.5">
                   {g.events.map((ev, i) => (
