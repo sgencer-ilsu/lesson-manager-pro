@@ -1,21 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Student, Planned, Lesson, CalendarEvent } from "./types";
-import { addDays, addMinutesToTime, DURATION_MIN, timeToMinutes, toISODate } from "./utils";
-
+import { addDays, addMinutesToTime, DURATION_MIN, monthRange, timeToMinutes, toISODate } from "./utils";
+ 
 // ============ STUDENTS ============
-
+ 
 export async function getStudents(sb: SupabaseClient): Promise<Student[]> {
   const { data, error } = await sb.from("students").select("*").order("active", { ascending: false }).order("name");
   if (error) throw error;
   return data as Student[];
 }
-
+ 
 export async function getActiveStudents(sb: SupabaseClient): Promise<Student[]> {
   const { data, error } = await sb.from("students").select("*").eq("active", true).order("name");
   if (error) throw error;
   return data as Student[];
 }
-
+ 
 export async function addStudent(
   sb: SupabaseClient,
   fields: Omit<Partial<Student>, "id" | "user_id" | "created_at">
@@ -26,9 +26,9 @@ export async function addStudent(
   const { error } = await sb.from("students").insert({ ...fields, color, active: fields.active ?? true });
   if (error) throw error;
 }
-
+ 
 // ============ RECURRING / MATERIALIZATION (kron işleri) ============
-
+ 
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
 export async function materializeDue(sb: SupabaseClient) {
   const now = new Date();
@@ -38,7 +38,7 @@ export async function materializeDue(sb: SupabaseClient) {
     .eq("status", "planned")
     .is("materialized_lesson_id", null);
   if (error) throw error;
-
+ 
   for (const r of rows || []) {
     const dt = new Date(`${r.lesson_date}T${r.lesson_time}:00`);
     if (dt <= now) {
@@ -63,21 +63,21 @@ export async function materializeDue(sb: SupabaseClient) {
     }
   }
 }
-
+ 
 /** Tekrarlayan (haftalık) planların ileriki/geçmiş 90 günlük tekil kayıtlarını oluşturur. */
 export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 90) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = addDays(today, -30);
   const end = addDays(today, untilDays);
-
+ 
   const { data: masters, error } = await sb
     .from("planned")
     .select("*")
     .eq("recurring", true)
     .is("parent_plan_id", null);
   if (error) throw error;
-
+ 
   for (const m of masters || []) {
     const masterDate = new Date(`${m.lesson_date}T00:00:00`);
     const weekday = m.weekday ?? (masterDate.getDay() + 6) % 7;
@@ -113,17 +113,24 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
     }
   }
 }
-
+ 
 // ============ DASHBOARD ============
-
+ 
 export async function getDashboardTotals(sb: SupabaseClient, monthText: string) {
   const today = toISODate(new Date());
-  const [{ data: plannedRows }, { data: earnedRows }, { data: paidRows }, { count }] = await Promise.all([
-    sb.from("planned").select("fee").like("lesson_date", `${monthText}%`),
-    sb.from("lessons").select("fee").like("lesson_date", `${monthText}%`).lte("lesson_date", today),
-    sb.from("lessons").select("fee").like("lesson_date", `${monthText}%`).eq("paid", true),
-    sb.from("planned").select("*", { count: "exact", head: true }).like("lesson_date", `${monthText}%`),
+  const { start, end } = monthRange(monthText);
+  const [
+    { data: plannedRows, error: e1 },
+    { data: earnedRows, error: e2 },
+    { data: paidRows, error: e3 },
+    { count, error: e4 },
+  ] = await Promise.all([
+    sb.from("planned").select("fee").gte("lesson_date", start).lt("lesson_date", end),
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).lte("lesson_date", today),
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).eq("paid", true),
+    sb.from("planned").select("*", { count: "exact", head: true }).gte("lesson_date", start).lt("lesson_date", end),
   ]);
+  if (e1 || e2 || e3 || e4) throw e1 || e2 || e3 || e4;
   const sum = (rows: { fee: number }[] | null) => (rows || []).reduce((a, r) => a + (r.fee || 0), 0);
   return {
     planned: sum(plannedRows as any),
@@ -132,7 +139,7 @@ export async function getDashboardTotals(sb: SupabaseClient, monthText: string) 
     count: count || 0,
   };
 }
-
+ 
 export type TodayRow = {
   kind: "done" | "planned";
   lesson_date: string;
@@ -143,7 +150,7 @@ export type TodayRow = {
   subject: string;
   color: string;
 };
-
+ 
 export async function getTodayPanel(sb: SupabaseClient): Promise<TodayRow[]> {
   const today = toISODate(new Date());
   const [{ data: done, error: e1 }, { data: planned, error: e2 }] = await Promise.all([
@@ -157,7 +164,7 @@ export async function getTodayPanel(sb: SupabaseClient): Promise<TodayRow[]> {
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-
+ 
   const rows: TodayRow[] = [];
   for (const r of done || []) {
     const s: any = (r as any).students;
@@ -170,9 +177,9 @@ export async function getTodayPanel(sb: SupabaseClient): Promise<TodayRow[]> {
   rows.sort((a, b) => a.lesson_time.localeCompare(b.lesson_time));
   return rows;
 }
-
+ 
 // ============ CALENDAR (haftalık görünüm) ============
-
+ 
 export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, weekEndISO: string): Promise<CalendarEvent[]> {
   const [{ data: plannedRows, error: e1 }, { data: lessonRows, error: e2 }] = await Promise.all([
     sb
@@ -189,7 +196,7 @@ export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, we
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-
+ 
   const events: CalendarEvent[] = [];
   for (const p of plannedRows || []) {
     const s: any = (p as any).students;
@@ -237,7 +244,7 @@ export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, we
   events.sort((a, b) => (a.lesson_date + a.lesson_time).localeCompare(b.lesson_date + b.lesson_time));
   return events;
 }
-
+ 
 /** Takvimden / dialogdan yeni ders planlama. Geçmiş bir zaman seçilirse direkt yapılan ders olarak kaydedilir. */
 export async function planLesson(
   sb: SupabaseClient,
@@ -253,7 +260,7 @@ export async function planLesson(
 ) {
   const selectedDt = new Date(`${params.date}T${params.time}:00`);
   const weekday = (new Date(`${params.date}T00:00:00`).getDay() + 6) % 7;
-
+ 
   if (selectedDt <= new Date() && !params.recurring) {
     const { data: lesson, error: e1 } = await sb
       .from("lessons")
@@ -270,7 +277,7 @@ export async function planLesson(
       .select()
       .single();
     if (e1) throw e1;
-
+ 
     const { data: plan, error: e2 } = await sb
       .from("planned")
       .insert({
@@ -288,7 +295,7 @@ export async function planLesson(
       .select()
       .single();
     if (e2) throw e2;
-
+ 
     await sb.from("lessons").update({ planned_id: plan.id }).eq("id", lesson.id);
   } else {
     const { error } = await sb.from("planned").insert({
@@ -305,9 +312,9 @@ export async function planLesson(
     if (error) throw error;
   }
 }
-
+ 
 export type RecurringScope = "one" | "series";
-
+ 
 export async function saveEvent(
   sb: SupabaseClient,
   ev: CalendarEvent,
@@ -336,7 +343,7 @@ export async function saveEvent(
     }
   }
 }
-
+ 
 export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: RecurringScope) {
   if (scope === "series") {
     const masterId = ev.parent_plan_id || ev.plan_id;
@@ -355,7 +362,7 @@ export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: 
     if (ev.plan_id) await sb.from("planned").delete().eq("id", ev.plan_id);
   }
 }
-
+ 
 export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, newDate: string, newTime: string, scope: RecurringScope) {
   const weekday = (new Date(`${newDate}T00:00:00`).getDay() + 6) % 7;
   if (ev.lesson_id) {
@@ -371,9 +378,9 @@ export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, ne
     }
   }
 }
-
+ 
 // ============ DERSLER / RAPORLAR listesi ============
-
+ 
 export type LessonRow = {
   row_type: "lesson" | "planned";
   row_id: number;
@@ -386,7 +393,7 @@ export type LessonRow = {
   school: string;
   subject: string;
 };
-
+ 
 export async function getLessonRows(
   sb: SupabaseClient,
   monthText: string,
@@ -394,9 +401,14 @@ export async function getLessonRows(
   paidFilter: "Tümü" | "Ödendi" | "Ödenmedi" | "Planlandı"
 ): Promise<LessonRow[]> {
   const rows: LessonRow[] = [];
-
+  const { start, end } = monthRange(monthText);
+ 
   if (paidFilter !== "Planlandı") {
-    let q = sb.from("lessons").select("id,lesson_date,lesson_time,topic,fee,paid,students(name,school,subject)").like("lesson_date", `${monthText}%`);
+    let q = sb
+      .from("lessons")
+      .select("id,lesson_date,lesson_time,topic,fee,paid,students(name,school,subject)")
+      .gte("lesson_date", start)
+      .lt("lesson_date", end);
     if (studentId) q = q.eq("student_id", studentId);
     if (paidFilter === "Ödendi") q = q.eq("paid", true);
     if (paidFilter === "Ödenmedi") q = q.eq("paid", false);
@@ -407,12 +419,13 @@ export async function getLessonRows(
       rows.push({ row_type: "lesson", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: r.topic || "", fee: r.fee, paid: r.paid, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
     }
   }
-
+ 
   if (paidFilter === "Tümü" || paidFilter === "Planlandı") {
     let q = sb
       .from("planned")
       .select("id,lesson_date,lesson_time,fee,students(name,school,subject)")
-      .like("lesson_date", `${monthText}%`)
+      .gte("lesson_date", start)
+      .lt("lesson_date", end)
       .is("materialized_lesson_id", null)
       .eq("status", "planned");
     if (studentId) q = q.eq("student_id", studentId);
@@ -423,19 +436,19 @@ export async function getLessonRows(
       rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: "", fee: r.fee, paid: false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
     }
   }
-
+ 
   rows.sort((a, b) => (a.lesson_date + a.lesson_time + a.row_type).localeCompare(b.lesson_date + b.lesson_time + b.row_type));
   return rows;
 }
-
+ 
 export async function updateLessonTopic(sb: SupabaseClient, lessonId: number, topic: string) {
   await sb.from("lessons").update({ topic }).eq("id", lessonId);
 }
-
+ 
 export async function updateLessonPaid(sb: SupabaseClient, lessonId: number, paid: boolean) {
   await sb.from("lessons").update({ paid }).eq("id", lessonId);
 }
-
+ 
 export async function quickAddLesson(
   sb: SupabaseClient,
   params: { studentId: number; date: string; time: string; topic: string; fee: number; paid: boolean }
@@ -452,3 +465,4 @@ export async function quickAddLesson(
   });
   if (error) throw error;
 }
+ 
