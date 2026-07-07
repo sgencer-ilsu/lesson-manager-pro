@@ -163,7 +163,7 @@ export default function WeekCalendar({
       <div
         ref={scrollRef}
         className="overflow-y-auto rounded-b-md border border-[#26364f]"
-        style={{ maxHeight: compact ? 360 : "calc(100vh - 260px)", background: "#0f172a" }}
+        style={{ maxHeight: compact ? "calc(100vh - 430px)" : "calc(100vh - 260px)", minHeight: 320, background: "#0f172a" }}
       >
         <div className="flex relative" style={{ height: 24 * hourPx }}>
           {/* saat etiketleri */}
