@@ -7,6 +7,16 @@ import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
 
+function StatChip({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" }) {
+  const valueColor = tone === "emerald" ? "text-emerald-300" : tone === "amber" ? "text-amber-300" : "text-white";
+  return (
+    <div className="rounded-xl border border-[#1f2a40] bg-[#101828] px-4 py-2.5 min-w-[110px]">
+      <div className="text-[11px] text-muted font-medium">{label}</div>
+      <div className={`text-base font-bold ${valueColor}`}>{value}</div>
+    </div>
+  );
+}
+
 export default function LessonsPage() {
   const sb = createClient();
   const [students, setStudents] = useState<Student[]>([]);
@@ -54,48 +64,56 @@ export default function LessonsPage() {
   const studentName = studentId ? students.find((s) => s.id === studentId)?.name || null : null;
 
   return (
-    <div className="max-w-[1200px] space-y-4">
+    <div className="max-w-[1200px] space-y-5">
       <h1 className="text-2xl font-bold text-white">Dersler</h1>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="block text-xs text-muted mb-1">Ay</label>
-          <input className="input w-[130px]" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
+      <div className="card p-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Ay</label>
+            <input className="input w-[130px]" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Öğrenci</label>
+            <select className="input w-[180px]" value={studentId ?? 0} onChange={(e) => setStudentId(Number(e.target.value) || null)}>
+              <option value={0}>Tümü</option>
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Ödeme</label>
+            <select className="input w-[140px]" value={paidFilter} onChange={(e) => setPaidFilter(e.target.value as any)}>
+              <option>Tümü</option>
+              <option>Ödendi</option>
+              <option>Ödenmedi</option>
+              <option>Planlandı</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2 ml-auto">
+            <button className="btn-primary" onClick={filter} disabled={loading}>
+              {loading ? "Filtreleniyor…" : "Filtrele"}
+            </button>
+            <button className="btn" onClick={() => exportCSV(rows, `ders_raporu_${month}.csv`)}>
+              CSV Aktar
+            </button>
+            <button className="btn" onClick={() => exportPDF(rows, month, studentName)}>
+              PDF Kaydet
+            </button>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Öğrenci</label>
-          <select className="input w-[180px]" value={studentId ?? 0} onChange={(e) => setStudentId(Number(e.target.value) || null)}>
-            <option value={0}>Tümü</option>
-            {students.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Ödeme</label>
-          <select className="input w-[140px]" value={paidFilter} onChange={(e) => setPaidFilter(e.target.value as any)}>
-            <option>Tümü</option>
-            <option>Ödendi</option>
-            <option>Ödenmedi</option>
-            <option>Planlandı</option>
-          </select>
-        </div>
-        <button className="btn-primary" onClick={filter} disabled={loading}>
-          Filtrele
-        </button>
-        <button className="btn" onClick={() => exportCSV(rows, `ders_raporu_${month}.csv`)}>
-          CSV Aktar
-        </button>
-        <button className="btn" onClick={() => exportPDF(rows, month, studentName)}>
-          PDF Kaydet
-        </button>
       </div>
 
-      <p className="text-sm font-semibold text-white">
-        Toplam: {money(total)} &nbsp; Yapılan: {money(done)} &nbsp; Planlanan: {money(planned)} &nbsp; Ders: {rows.length}
-      </p>
+      <div className="flex flex-wrap gap-3">
+        <StatChip label="Toplam" value={money(total)} />
+        <StatChip label="Yapılan" value={money(done)} tone="emerald" />
+        <StatChip label="Planlanan" value={money(planned)} tone="amber" />
+        <StatChip label="Ders" value={String(rows.length)} />
+      </div>
 
       <div className="card overflow-hidden">
         <table className="data-table">
