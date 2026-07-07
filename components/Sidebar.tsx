@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "◧" },
   { href: "/students", label: "Öğrenciler", icon: "◔" },
-  { href: "/add-lesson", label: "Ders Ekle", icon: "✚" },
   { href: "/calendar", label: "Takvim", icon: "▦" },
   { href: "/lessons", label: "Dersler", icon: "☰" },
   { href: "/reports", label: "Raporlar", icon: "▤" },
