@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { CalendarEvent } from "@/lib/types";
 import { getWeekEvents, planLesson, saveEvent, deleteEvent, moveCalendarItem, type RecurringScope } from "@/lib/data";
@@ -29,7 +29,7 @@ export default function WeekCalendar({
   compact?: boolean;
   onChanged?: () => void;
 }) {
-  const sb = createClient();
+  const sb = useMemo(() => createClient(), []);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [dialog, setDialog] = useState<DialogState>({ kind: "none" });
   const [pending, setPending] = useState<PendingAction | null>(null);
