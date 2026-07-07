@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Card from "@/components/Card";
+import { WalletIcon, TrendingUpIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import WeekCalendar from "@/components/WeekCalendar";
 import {
   getDashboardTotals,
@@ -56,10 +57,10 @@ export default function DashboardPage() {
       </div>
 
       <div className="flex gap-4 flex-wrap">
-        <Card title="Tahmini Aylık Gelir" value={money(totals.planned)} subtitle="Bu ay planlanan" icon="💼" accent="#2563eb" />
-        <Card title="Bugüne Kadar Hakediş" value={money(totals.earned)} subtitle="Zamanı gelen dersler" icon="●" accent="#22c55e" />
-        <Card title="Tahsil Edilen" value={money(totals.paid)} subtitle="Ödenen" icon="▰" accent="#f59e0b" />
-        <Card title="Planlanan Ders" value={String(totals.count)} subtitle="Bu ay" icon="▣" accent="#9333ea" />
+        <Card title="Tahmini Aylık Gelir" value={money(totals.planned)} subtitle="Bu ay planlanan" icon={<WalletIcon />} accent="#2563eb" />
+        <Card title="Bugüne Kadar Hakediş" value={money(totals.earned)} subtitle="Zamanı gelen dersler" icon={<TrendingUpIcon />} accent="#22c55e" />
+        <Card title="Tahsil Edilen" value={money(totals.paid)} subtitle="Ödenen" icon={<CheckCircleIcon />} accent="#f59e0b" />
+        <Card title="Planlanan Ders" value={String(totals.count)} subtitle="Bu ay" icon={<CalendarIcon />} accent="#9333ea" />
       </div>
 
       <div className="card p-5">
