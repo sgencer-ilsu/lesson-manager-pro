@@ -5,11 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: "◧" },
-  { href: "/students", label: "Öğrenciler", icon: "◔" },
-  { href: "/calendar", label: "Takvim", icon: "▦" },
-  { href: "/lessons", label: "Dersler", icon: "☰" },
-  { href: "/reports", label: "Raporlar", icon: "▤" },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/students", label: "Öğrenciler" },
+  { href: "/calendar", label: "Takvim" },
+  { href: "/lessons", label: "Dersler" },
+  { href: "/reports", label: "Raporlar" },
 ];
 
 export default function Sidebar() {
@@ -40,7 +40,6 @@ export default function Sidebar() {
           const active = pathname === item.href;
           return (
             <Link key={item.href} href={item.href} className={`nav-btn ${active ? "active" : ""}`}>
-              <span className="w-5 text-center">{item.icon}</span>
               {item.label}
             </Link>
           );
@@ -48,7 +47,6 @@ export default function Sidebar() {
       </nav>
 
       <button onClick={signOut} className="nav-btn text-red-300 hover:text-red-200 hover:bg-[#241621]">
-        <span className="w-5 text-center">⏻</span>
         Çıkış Yap
       </button>
     </aside>
