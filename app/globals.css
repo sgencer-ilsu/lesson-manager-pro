@@ -36,24 +36,37 @@ html, body {
   box-shadow: 0 10px 28px rgba(0,0,0,0.35);
 }
 
+.nav-group {
+  border: 1px solid #1a2338;
+  background: #0a0f1c;
+  border-radius: 14px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .nav-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  color: #9fb0c9;
-  font-weight: 600;
-  font-size: 14px;
-  transition: background 0.15s ease, color 0.15s ease;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: #8b98b3;
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  border-left: 2px solid transparent;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .nav-btn:hover {
-  background: #16213a;
-  color: #e5e7eb;
+  background: #131e33;
+  color: #dbe2ee;
 }
 .nav-btn.active {
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-  color: white;
+  background: rgba(37, 99, 235, 0.14);
+  color: #fff;
+  font-weight: 600;
+  border-left-color: #3b82f6;
 }
 
 .input {
