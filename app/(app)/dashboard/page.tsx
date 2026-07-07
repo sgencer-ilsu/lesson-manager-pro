@@ -1,0 +1,110 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
+import Card from "@/components/Card";
+import WeekCalendar from "@/components/WeekCalendar";
+import {
+  getDashboardTotals,
+  getTodayPanel,
+  materializeDue,
+  ensureRecurringInstances,
+  type TodayRow,
+} from "@/lib/data";
+import { money, monthKey, TR_DAYS, TR_MONTHS, addMinutesToTime, DURATION_MIN, mondayOf } from "@/lib/utils";
+
+export default function DashboardPage() {
+  const sb = createClient();
+  const [now, setNow] = useState(new Date());
+  const [totals, setTotals] = useState({ planned: 0, earned: 0, paid: 0, count: 0 });
+  const [today, setToday] = useState<TodayRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const load = useCallback(async () => {
+    await ensureRecurringInstances(sb);
+    await materializeDue(sb);
+    const [tot, tod] = await Promise.all([getDashboardTotals(sb, monthKey()), getTodayPanel(sb)]);
+    setTotals(tot);
+    setToday(tod);
+    setLoading(false);
+  }, [sb]);
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 60000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  const todayTotal = today.reduce((a, r) => a + (r.fee || 0), 0);
+
+  return (
+    <div className="space-y-6 max-w-[1200px]">
+      <div>
+        <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
+        <div className="flex items-center gap-3 text-sm text-muted">
+          <span>
+            {now.getDate()} {TR_MONTHS[now.getMonth()]} {now.getFullYear()} • {TR_DAYS[(now.getDay() + 6) % 7]}
+          </span>
+          <span className="font-mono">{now.toLocaleTimeString("tr-TR")}</span>
+        </div>
+      </div>
+
+      <div className="flex gap-4 flex-wrap">
+        <Card title="Tahmini Aylık Gelir" value={money(totals.planned)} subtitle="Bu ay planlanan" icon="💼" accent="#2563eb" />
+        <Card title="Bugüne Kadar Hakediş" value={money(totals.earned)} subtitle="Zamanı gelen dersler" icon="●" accent="#22c55e" />
+        <Card title="Tahsil Edilen" value={money(totals.paid)} subtitle="Ödenen" icon="▰" accent="#f59e0b" />
+        <Card title="Planlanan Ders" value={String(totals.count)} subtitle="Bu ay" icon="▣" accent="#9333ea" />
+      </div>
+
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-white">Bugün</h2>
+          <span className="text-xs text-muted">
+            {today.length} ders • {money(todayTotal)}
+          </span>
+        </div>
+        {loading ? (
+          <p className="text-sm text-muted">Yükleniyor…</p>
+        ) : today.length === 0 ? (
+          <p className="text-sm text-[#64748b] py-3">Bugün ders görünmüyor.</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Saat</th>
+                <th>Öğrenci</th>
+                <th>Ders / Konu</th>
+                <th>Tutar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {today.map((r, i) => {
+                const end = addMinutesToTime(r.lesson_time, DURATION_MIN);
+                const dersKonu = r.topic ? `${r.subject} — ${r.topic}` : r.subject;
+                return (
+                  <tr key={i} className={r.kind === "planned" ? "opacity-60" : ""}>
+                    <td>
+                      {r.lesson_time} – {end}
+                    </td>
+                    <td>{r.name}</td>
+                    <td>{dersKonu}</td>
+                    <td>{money(r.fee)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card p-4">
+        <WeekCalendar compact weekStart={mondayOf(new Date())} onChanged={load} />
+      </div>
+    </div>
+  );
+}
