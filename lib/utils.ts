@@ -1,4 +1,3 @@
-Utils · TS
 export const APP_NAME = "S.GENCER DERS TAKİP";
 export const APP_VERSION = "Web 1.0";
 export const DURATION_MIN = 90;
