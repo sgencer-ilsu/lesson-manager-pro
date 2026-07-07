@@ -35,7 +35,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex flex-col gap-1 flex-1">
+      <nav className="nav-group flex-1">
         {NAV.map((item) => {
           const active = pathname === item.href;
           return (
@@ -46,9 +46,11 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <button onClick={signOut} className="nav-btn text-red-300 hover:text-red-200 hover:bg-[#241621]">
-        Çıkış Yap
-      </button>
+      <div className="border-t border-[#1a2338] mt-3 pt-3">
+        <button onClick={signOut} className="nav-btn w-full text-red-300 hover:text-red-200 hover:bg-[#241621]">
+          Çıkış Yap
+        </button>
+      </div>
     </aside>
   );
 }
