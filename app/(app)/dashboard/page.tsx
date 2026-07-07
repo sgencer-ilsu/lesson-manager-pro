@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Card from "@/components/Card";
 import WeekCalendar from "@/components/WeekCalendar";
@@ -19,6 +19,7 @@ export default function DashboardPage() {
   const [totals, setTotals] = useState({ planned: 0, earned: 0, paid: 0, count: 0 });
   const [today, setToday] = useState<TodayRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const dashboardWeekStart = useMemo(() => mondayOf(new Date()), []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -103,7 +104,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="card p-4">
-        <WeekCalendar compact weekStart={mondayOf(new Date())} onChanged={load} />
+        <WeekCalendar compact weekStart={dashboardWeekStart} onChanged={load} />
       </div>
     </div>
   );
