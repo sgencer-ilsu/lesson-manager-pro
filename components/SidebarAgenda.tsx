@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getWeekEvents } from "@/lib/data";
 import type { CalendarEvent } from "@/lib/types";
-import { addDays, addMinutesToTime, DURATION_MIN, toISODate, TR_DAYS_SHORT, TR_MONTHS_SHORT } from "@/lib/utils";
+import { addDays, addMinutesToTime, DURATION_MIN, timeToMinutes, toISODate, TR_DAYS_SHORT, TR_MONTHS_SHORT } from "@/lib/utils";
 import { onLessonsChanged } from "@/lib/events";
 
 type DayGroup = {
@@ -23,6 +23,12 @@ export default function SidebarAgenda() {
   const todayRef = useRef<HTMLDivElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const scrolledRef = useRef(false);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const load = useMemo(() => {
     return async () => {
@@ -82,44 +88,61 @@ export default function SidebarAgenda() {
         ) : groups.length === 0 ? (
           <p className="text-xs text-muted px-2 py-3">Görünen ders yok.</p>
         ) : (
-          groups.map((g) => (
-            <div key={g.dateISO} ref={g.isToday ? todayRef : undefined}>
-              {g.isToday && (
-                <div className="flex items-center gap-1.5 my-1 px-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                  <span className="h-px flex-1 bg-red-500/70" />
-                </div>
-              )}
-              <div className="flex gap-2.5 px-2 py-2.5">
-                <div className="shrink-0 w-10 flex flex-col items-center text-center">
-                  <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold ${
-                      g.isToday ? "bg-accent text-white" : "text-[#8b98b3]"
-                    }`}
-                  >
-                    {g.day}
-                  </div>
-                  <div className="text-[9px] text-muted font-semibold tracking-wide mt-1 leading-tight whitespace-nowrap">{g.month}</div>
-                  <div className="text-[9px] text-muted/70 leading-tight whitespace-nowrap">{g.weekday}</div>
-                </div>
-                <div className="flex-1 min-w-0 space-y-1.5 pt-0.5">
-                  {g.events.map((ev, i) => (
-                    <div key={i} className="flex items-start gap-1.5 text-[12px]">
-                      <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: ev.color }} />
-                      <div className="min-w-0">
-                        <div className="text-[#8b98b3]">
-                          {ev.lesson_time} – {addMinutesToTime(ev.lesson_time, DURATION_MIN)}
-                        </div>
-                        <div className="text-[#dbe2ee] font-medium truncate">{ev.student_name}</div>
-                      </div>
+          groups.map((g) => {
+            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+            const pastEvents = g.isToday ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN <= nowMinutes) : [];
+            const upcomingEvents = g.isToday ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN > nowMinutes) : g.events;
+
+            return (
+              <div key={g.dateISO} ref={g.isToday ? todayRef : undefined}>
+                <div className="flex gap-2.5 px-2 py-2.5">
+                  <div className="shrink-0 w-10 flex flex-col items-center text-center">
+                    <div
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold ${
+                        g.isToday ? "bg-accent text-white" : "text-[#8b98b3]"
+                      }`}
+                    >
+                      {g.day}
                     </div>
-                  ))}
+                    <div className="text-[9px] text-muted font-semibold tracking-wide mt-1 leading-tight whitespace-nowrap">{g.month}</div>
+                    <div className="text-[9px] text-muted/70 leading-tight whitespace-nowrap">{g.weekday}</div>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5 pt-0.5">
+                    {pastEvents.map((ev, i) => (
+                      <EventRow key={`past-${i}`} ev={ev} dim />
+                    ))}
+
+                    {g.isToday && (
+                      <div className="flex items-center gap-1.5 py-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        <span className="h-px flex-1 bg-red-500/70" />
+                      </div>
+                    )}
+
+                    {upcomingEvents.map((ev, i) => (
+                      <EventRow key={`up-${i}`} ev={ev} />
+                    ))}
+                  </div>
                 </div>
+                <div className="border-b border-[#161f34]" />
               </div>
-              <div className="border-b border-[#161f34]" />
-            </div>
-          ))
+            );
+          })
         )}
+      </div>
+    </div>
+  );
+}
+
+function EventRow({ ev, dim = false }: { ev: CalendarEvent; dim?: boolean }) {
+  return (
+    <div className={`flex items-start gap-1.5 text-[12px] ${dim ? "opacity-45" : ""}`}>
+      <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: ev.color }} />
+      <div className="min-w-0">
+        <div className="text-[#8b98b3]">
+          {ev.lesson_time} – {addMinutesToTime(ev.lesson_time, DURATION_MIN)}
+        </div>
+        <div className="text-[#dbe2ee] font-medium truncate">{ev.student_name}</div>
       </div>
     </div>
   );
