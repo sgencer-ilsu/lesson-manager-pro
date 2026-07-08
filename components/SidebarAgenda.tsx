@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getWeekEvents } from "@/lib/data";
 import type { CalendarEvent } from "@/lib/types";
 import { addDays, addMinutesToTime, DURATION_MIN, toISODate, TR_DAYS_SHORT, TR_MONTHS_SHORT } from "@/lib/utils";
+import { onLessonsChanged } from "@/lib/events";
 
 type DayGroup = {
   dateISO: string;
@@ -23,8 +24,8 @@ export default function SidebarAgenda() {
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const scrolledRef = useRef(false);
 
-  useEffect(() => {
-    async function load() {
+  const load = useMemo(() => {
+    return async () => {
       const today = new Date();
       const start = addDays(today, -30);
       const end = addDays(today, 60);
@@ -53,9 +54,17 @@ export default function SidebarAgenda() {
 
       setGroups(built);
       setLoading(false);
-    }
-    load();
+    };
   }, [sb]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const unsubscribe = onLessonsChanged(() => load());
+    return unsubscribe;
+  }, [load]);
 
   useEffect(() => {
     if (!scrolledRef.current && groups.length > 0 && todayRef.current && scrollAreaRef.current) {
