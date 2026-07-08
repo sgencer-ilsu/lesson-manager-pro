@@ -79,6 +79,9 @@ export default function SidebarAgenda() {
     }
   }, [groups]);
 
+  const todayISOForCompare = toISODate(now);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
   return (
     <div className="flex-1 min-h-0 flex flex-col mt-4 border-t border-[#1a2338] pt-3">
       <div className="text-[11px] font-semibold text-muted tracking-wide px-2 mb-1">DERS AKIŞI</div>
@@ -89,9 +92,19 @@ export default function SidebarAgenda() {
           <p className="text-xs text-muted px-2 py-3">Görünen ders yok.</p>
         ) : (
           groups.map((g) => {
-            const nowMinutes = now.getHours() * 60 + now.getMinutes();
-            const pastEvents = g.isToday ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN <= nowMinutes) : [];
-            const upcomingEvents = g.isToday ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN > nowMinutes) : g.events;
+            // Bugünden önceki tüm günler tamamen soluk gösterilir.
+            // Bugünün kendisi ise saat bazında bölünür: geçmiş saatler soluk, gelecek saatler canlı.
+            const isPastDay = g.dateISO < todayISOForCompare;
+            const pastEvents = isPastDay
+              ? g.events
+              : g.isToday
+              ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN <= nowMinutes)
+              : [];
+            const upcomingEvents = isPastDay
+              ? []
+              : g.isToday
+              ? g.events.filter((ev) => timeToMinutes(ev.lesson_time) + DURATION_MIN > nowMinutes)
+              : g.events;
 
             return (
               <div key={g.dateISO} ref={g.isToday ? todayRef : undefined}>
