@@ -36,6 +36,7 @@ export default function WeekCalendar({
   const [pending, setPending] = useState<PendingAction | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragEventRef = useRef<CalendarEvent | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ dayIndex: number; minutes: number } | null>(null);
 
   const hourPx = compact ? 40 : 60;
   const headerPx = 34;
@@ -124,15 +125,27 @@ export default function WeekCalendar({
     }
   }
 
-  function onDayDrop(dayIndex: number, e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const ev = dragEventRef.current;
-    dragEventRef.current = null;
-    if (!ev) return;
+  function snapMinutesFromEvent(e: React.DragEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>): number {
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
     const y = e.clientY - rect.top;
     let minutes = Math.round((y / hourPx) * 60);
     minutes = Math.max(0, Math.min(23 * 60 + 45, Math.round(minutes / 15) * 15));
+    return minutes;
+  }
+
+  function onDayDragOver(dayIndex: number, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (!dragEventRef.current) return;
+    setDragPreview({ dayIndex, minutes: snapMinutesFromEvent(e) });
+  }
+
+  function onDayDrop(dayIndex: number, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const ev = dragEventRef.current;
+    dragEventRef.current = null;
+    setDragPreview(null);
+    if (!ev) return;
+    const minutes = snapMinutesFromEvent(e);
     const day = addDays(weekStart, dayIndex);
     requestMove(ev, toISODate(day), minutesToTime(minutes));
   }
@@ -190,7 +203,7 @@ export default function WeekCalendar({
                 key={dayIndex}
                 className="flex-1 relative border-l border-[#26364f]"
                 style={{ background: isToday ? "rgba(37,99,235,0.09)" : "transparent" }}
-                onDragOver={(e) => e.preventDefault()}
+                onDragOver={(e) => onDayDragOver(dayIndex, e)}
                 onDrop={(e) => onDayDrop(dayIndex, e)}
                 onDoubleClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -218,6 +231,10 @@ export default function WeekCalendar({
                       onDragStart={() => {
                         dragEventRef.current = ev;
                       }}
+                      onDragEnd={() => {
+                        dragEventRef.current = null;
+                        setDragPreview(null);
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setDialog({ kind: "edit", event: ev });
@@ -240,6 +257,20 @@ export default function WeekCalendar({
                     </div>
                   );
                 })}
+
+                {dragPreview && dragPreview.dayIndex === dayIndex && (
+                  <div
+                    className="absolute left-1 right-1 rounded-lg border-2 border-dashed border-white/70 bg-white/10 pointer-events-none flex items-start justify-center z-10"
+                    style={{
+                      top: (dragPreview.minutes / 60) * hourPx,
+                      height: Math.max(24, (DURATION_MIN / 60) * hourPx - 4),
+                    }}
+                  >
+                    <span className="text-[10px] font-bold text-white bg-black/60 rounded px-1.5 py-0.5 mt-1 whitespace-nowrap">
+                      {minutesToTime(dragPreview.minutes)} – {addMinutesToTime(minutesToTime(dragPreview.minutes), DURATION_MIN)}
+                    </span>
+                  </div>
+                )}
 
                 {isToday && showNowLine && (
                   <div className="absolute left-0 right-0 flex items-center pointer-events-none" style={{ top: (nowMinutes / 60) * hourPx }}>
