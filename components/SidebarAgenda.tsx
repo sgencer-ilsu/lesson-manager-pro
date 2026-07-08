@@ -128,7 +128,7 @@ export default function SidebarAgenda() {
 
 function EventRow({ ev, dim = false }: { ev: CalendarEvent; dim?: boolean }) {
   return (
-    <div className={`flex items-start gap-1.5 text-[12px] ${dim ? "opacity-45" : ""}`}>
+    <div className={`flex items-start gap-1.5 text-[12px] ${dim ? "opacity-[0.42]" : ""}`}>
       <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: ev.color }} />
       <div className="min-w-0">
         <div className="text-[#8b98b3]">
