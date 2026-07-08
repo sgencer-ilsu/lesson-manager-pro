@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { CalendarEvent } from "@/lib/types";
 import { getWeekEvents, planLesson, saveEvent, deleteEvent, moveCalendarItem, type RecurringScope } from "@/lib/data";
 import { addDays, addMinutesToTime, DURATION_MIN, timeToMinutes, minutesToTime, toISODate } from "@/lib/utils";
+import { emitLessonsChanged } from "@/lib/events";
 import LessonFormDialog from "./LessonFormDialog";
 import RecurringScopeDialog from "./RecurringScopeDialog";
 
@@ -59,6 +60,7 @@ export default function WeekCalendar({
   function refresh() {
     load();
     onChanged?.();
+    emitLessonsChanged();
   }
 
   async function handleNewSave(fields: any) {
