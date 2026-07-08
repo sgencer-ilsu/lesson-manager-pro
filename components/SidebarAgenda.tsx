@@ -95,7 +95,7 @@ export default function SidebarAgenda() {
 
             return (
               <div key={g.dateISO} ref={g.isToday ? todayRef : undefined}>
-                <div className="flex gap-2.5 px-2 py-2.5">
+                <div className={`flex gap-2.5 px-2 pt-2.5 ${g.isToday && upcomingEvents.length === 0 ? "pb-0" : "pb-2.5"}`}>
                   <div className="shrink-0 w-10 flex flex-col items-center text-center">
                     <div
                       className={`w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold ${
