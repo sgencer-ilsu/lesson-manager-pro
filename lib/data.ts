@@ -27,7 +27,14 @@ export async function addStudent(
   if (error) throw error;
 }
 
-// ============ RECURRING / MATERIALIZATION (kron işleri) ============
+export async function updateStudentField(
+  sb: SupabaseClient,
+  studentId: number,
+  fields: Partial<Pick<Student, "name" | "school" | "subject" | "fee" | "parent_name" | "phone" | "email">>
+) {
+  const { error } = await sb.from("students").update(fields).eq("id", studentId);
+  if (error) throw error;
+}
 
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
 export async function materializeDue(sb: SupabaseClient) {
