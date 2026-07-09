@@ -38,8 +38,8 @@ export default function MonthlyEarningsChart() {
   const diffPct = prevTotal > 0 ? Math.round((diff / prevTotal) * 100) : null;
 
   return (
-    <div className="card p-5">
-      <div className="flex items-center justify-between mb-1">
+    <div className="card p-4">
+      <div className="flex items-center justify-between mb-0.5">
         <h2 className="text-sm font-bold text-white">Aylık Kazanç Trendi</h2>
         {!loading && diffPct !== null && (
           <span className={`text-xs font-semibold ${diff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
@@ -47,14 +47,14 @@ export default function MonthlyEarningsChart() {
           </span>
         )}
       </div>
-      <div className="text-2xl font-bold text-white mb-4">{loading ? "…" : money(currentTotal)}</div>
+      <div className="text-lg font-bold text-white mb-2">{loading ? "…" : money(currentTotal)}</div>
 
       {loading ? (
-        <div className="h-[220px] flex items-center justify-center text-sm text-muted">Yükleniyor…</div>
+        <div className="h-[130px] flex items-center justify-center text-sm text-muted">Yükleniyor…</div>
       ) : (
-        <div className="h-[220px]">
+        <div className="h-[130px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+            <LineChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id="earningsLine" x1="0" y1="0" x2="1" y2="0">
                   <stop offset="0%" stopColor="#2563eb" />
@@ -62,13 +62,13 @@ export default function MonthlyEarningsChart() {
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="#1c2740" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} axisLine={{ stroke: "#26364f" }} />
+              <XAxis dataKey="label" stroke="#64748b" fontSize={10} tickLine={false} axisLine={{ stroke: "#26364f" }} />
               <YAxis
                 stroke="#64748b"
-                fontSize={11}
+                fontSize={10}
                 tickLine={false}
                 axisLine={false}
-                width={44}
+                width={38}
                 tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
               />
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#2a3d63", strokeWidth: 1 }} />
@@ -77,8 +77,8 @@ export default function MonthlyEarningsChart() {
                 dataKey="total"
                 stroke="url(#earningsLine)"
                 strokeWidth={2.5}
-                dot={{ r: 4, fill: "#0f172a", stroke: "#7c3aed", strokeWidth: 2 }}
-                activeDot={{ r: 6, fill: "#7c3aed" }}
+                dot={{ r: 3.5, fill: "#0f172a", stroke: "#7c3aed", strokeWidth: 2 }}
+                activeDot={{ r: 5.5, fill: "#7c3aed" }}
               />
             </LineChart>
           </ResponsiveContainer>
