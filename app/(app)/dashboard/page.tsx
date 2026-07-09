@@ -34,8 +34,8 @@ export default function DashboardPage() {
   }, [load]);
 
   return (
-    <div className="space-y-6 max-w-[1200px]">
-      <div>
+    <div className="flex flex-col gap-4 max-w-[1200px]" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="shrink-0">
         <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
         <div className="flex items-center gap-3 text-sm text-muted">
           <span>
@@ -45,14 +45,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex gap-4 flex-wrap">
+      <div className="flex gap-4 flex-wrap shrink-0">
         <Card title="Tahmini Aylık Gelir" value={money(totals.planned)} subtitle="Bu ay planlanan" icon={<WalletIcon />} accent="#2563eb" />
         <Card title="Bugüne Kadar Hakediş" value={money(totals.earned)} subtitle="Zamanı gelen dersler" icon={<TrendingUpIcon />} accent="#22c55e" />
         <Card title="Tahsil Edilen" value={money(totals.paid)} subtitle="Ödenen" icon={<CheckCircleIcon />} accent="#f59e0b" />
         <Card title="Planlanan Ders" value={String(totals.count)} subtitle="Bu ay" icon={<CalendarIcon />} accent="#9333ea" />
       </div>
 
-      <MonthlyEarningsChart />
+      <div className="shrink-0">
+        <MonthlyEarningsChart />
+      </div>
 
       <StudentNotesPanel />
     </div>
