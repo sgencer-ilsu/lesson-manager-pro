@@ -49,11 +49,11 @@ export default function StudentNotesPanel() {
   }
 
   return (
-    <div className="card p-5 flex flex-col" style={{ height: 520 }}>
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <h2 className="text-sm font-bold text-white">Öğrenci Ders Notları</h2>
+    <div className="card p-5 flex flex-col flex-1 min-h-0">
+      <div className="flex items-center justify-between mb-4 shrink-0 gap-3">
+        <h2 className="text-sm font-bold text-white whitespace-nowrap shrink-0">Ders Notlarım</h2>
         <select
-          className="input w-[200px]"
+          className="input w-[170px]"
           value={studentId ?? 0}
           onChange={(e) => setStudentId(Number(e.target.value) || null)}
         >
