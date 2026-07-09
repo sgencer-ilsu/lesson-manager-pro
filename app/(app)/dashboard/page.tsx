@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     await ensureRecurringInstances(sb);
     await materializeDue(sb);
+    fetch("/api/google/resync", { method: "POST" }).catch(() => {});
     const tot = await getDashboardTotals(sb, monthKey());
     setTotals(tot);
   }, [sb]);
