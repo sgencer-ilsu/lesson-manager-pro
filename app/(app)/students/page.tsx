@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getStudents, addStudent } from "@/lib/data";
+import { getStudents, addStudent, updateStudentField } from "@/lib/data";
 import type { Student } from "@/lib/types";
-import { money } from "@/lib/utils";
 
 const EMPTY = { name: "", school: "", subject: "", fee: "", parent_name: "", phone: "", email: "" };
 
@@ -46,6 +45,19 @@ export default function StudentsPage() {
     }
   }
 
+  async function saveField(student: Student, field: "name" | "school" | "subject" | "parent_name" | "phone", value: string) {
+    if (value === (student[field] as string)) return;
+    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, [field]: value } : r)));
+    await updateStudentField(sb, student.id, { [field]: value });
+  }
+
+  async function saveFee(student: Student, raw: string) {
+    const fee = parseFloat(raw.replace(/[^0-9.]/g, "")) || 0;
+    if (fee === student.fee) return;
+    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, fee } : r)));
+    await updateStudentField(sb, student.id, { fee });
+  }
+
   return (
     <div className="max-w-[1100px] space-y-6">
       <h1 className="text-2xl font-bold text-white">Öğrenciler</h1>
@@ -72,6 +84,7 @@ export default function StudentsPage() {
       </div>
 
       <div className="card overflow-hidden">
+        <p className="text-xs text-muted px-4 pt-3 -mb-1">Herhangi bir hücreye tıklayıp değiştirin, dışına tıklayınca otomatik kaydedilir.</p>
         <table className="data-table">
           <thead>
             <tr>
@@ -87,19 +100,48 @@ export default function StudentsPage() {
           <tbody>
             {students.map((s) => (
               <tr key={s.id} className={!s.active ? "opacity-50" : ""}>
-                <td>{s.id}</td>
-                <td>{s.name}</td>
-                <td>{s.school}</td>
-                <td>{s.subject}</td>
-                <td>{money(s.fee)}</td>
-                <td>{s.parent_name}</td>
-                <td>{s.phone}</td>
+                <td className="text-muted">{s.id}</td>
+                <td>
+                  <EditableCell value={s.name} onSave={(v) => saveField(s, "name", v)} />
+                </td>
+                <td>
+                  <EditableCell value={s.school} onSave={(v) => saveField(s, "school", v)} />
+                </td>
+                <td>
+                  <EditableCell value={s.subject} onSave={(v) => saveField(s, "subject", v)} />
+                </td>
+                <td>
+                  <EditableCell value={String(s.fee ?? "")} onSave={(v) => saveFee(s, v)} suffix=" TL" />
+                </td>
+                <td>
+                  <EditableCell value={s.parent_name} onSave={(v) => saveField(s, "parent_name", v)} />
+                </td>
+                <td>
+                  <EditableCell value={s.phone} onSave={(v) => saveField(s, "phone", v)} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         {students.length === 0 && <p className="text-sm text-muted p-5">Henüz öğrenci yok.</p>}
       </div>
+    </div>
+  );
+}
+
+function EditableCell({ value, onSave, suffix }: { value: string; onSave: (v: string) => void; suffix?: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full py-0.5"
+        defaultValue={value}
+        placeholder="—"
+        onBlur={(e) => onSave(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+      />
+      {suffix && <span className="text-muted shrink-0">{suffix}</span>}
     </div>
   );
 }
