@@ -10,7 +10,6 @@ const NAV = [
   { href: "/students", label: "Öğrenciler" },
   { href: "/calendar", label: "Takvim" },
   { href: "/lessons", label: "Dersler" },
-  { href: "/reports", label: "Raporlar" },
 ];
 
 export default function Sidebar() {
