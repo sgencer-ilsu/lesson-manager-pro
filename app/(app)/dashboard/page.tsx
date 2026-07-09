@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Card from "@/components/Card";
 import { WalletIcon, TrendingUpIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
-import WeekCalendar from "@/components/WeekCalendar";
+import MonthlyEarningsChart from "@/components/MonthlyEarningsChart";
+import StudentNotesPanel from "@/components/StudentNotesPanel";
 import { getDashboardTotals, materializeDue, ensureRecurringInstances } from "@/lib/data";
-import { money, monthKey, TR_DAYS, TR_MONTHS, mondayOf } from "@/lib/utils";
+import { money, monthKey, TR_DAYS, TR_MONTHS } from "@/lib/utils";
 
 export default function DashboardPage() {
   const sb = createClient();
   const [now, setNow] = useState(new Date());
   const [totals, setTotals] = useState({ planned: 0, earned: 0, paid: 0, count: 0 });
-  const dashboardWeekStart = useMemo(() => mondayOf(new Date()), []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -52,9 +52,9 @@ export default function DashboardPage() {
         <Card title="Planlanan Ders" value={String(totals.count)} subtitle="Bu ay" icon={<CalendarIcon />} accent="#9333ea" />
       </div>
 
-      <div className="card p-4">
-        <WeekCalendar compact weekStart={dashboardWeekStart} onChanged={load} />
-      </div>
+      <MonthlyEarningsChart />
+
+      <StudentNotesPanel />
     </div>
   );
 }
