@@ -49,7 +49,7 @@ export default function StudentNotesPanel() {
   }
 
   return (
-    <div className="card p-5 flex flex-col flex-1 min-h-0">
+    <div className="card p-5 flex flex-col" style={{ height: 320 }}>
       <div className="flex items-center justify-between mb-4 shrink-0 gap-3">
         <h2 className="text-sm font-bold text-white whitespace-nowrap shrink-0">Ders Notlarım</h2>
         <select
