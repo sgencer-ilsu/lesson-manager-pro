@@ -472,3 +472,57 @@ export async function quickAddLesson(
   });
   if (error) throw error;
 }
+
+// ============ AYLIK KAZANÇ GEÇMİŞİ ============
+
+export type MonthlyEarning = { monthKey: string; total: number };
+
+/** Son `monthsBack` ay için (bu ay dahil) yapılan derslerin toplam ücretini döner. */
+export async function getMonthlyEarnings(sb: SupabaseClient, monthsBack = 6): Promise<MonthlyEarning[]> {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() - (monthsBack - 1), 1);
+  const startISO = toISODate(start);
+
+  const { data, error } = await sb.from("lessons").select("lesson_date, fee").gte("lesson_date", startISO);
+  if (error) throw error;
+
+  const totals = new Map<string, number>();
+  for (let i = 0; i < monthsBack; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() - (monthsBack - 1) + i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    totals.set(key, 0);
+  }
+  for (const row of data || []) {
+    const key = row.lesson_date.slice(0, 7);
+    if (totals.has(key)) totals.set(key, (totals.get(key) || 0) + (row.fee || 0));
+  }
+
+  return Array.from(totals.entries()).map(([monthKey, total]) => ({ monthKey, total }));
+}
+
+// ============ ÖĞRENCİ DERS NOTLARI ============
+
+export type StudentLessonNote = {
+  id: number;
+  lesson_date: string;
+  lesson_time: string;
+  topic: string;
+  notes: string;
+};
+
+/** Bir öğrencinin geçmişte yapılmış derslerini (en eskiden en yeniye) döner. */
+export async function getStudentLessonHistory(sb: SupabaseClient, studentId: number): Promise<StudentLessonNote[]> {
+  const { data, error } = await sb
+    .from("lessons")
+    .select("id, lesson_date, lesson_time, topic, notes")
+    .eq("student_id", studentId)
+    .order("lesson_date", { ascending: true })
+    .order("lesson_time", { ascending: true });
+  if (error) throw error;
+  return (data || []) as StudentLessonNote[];
+}
+
+export async function updateLessonNotes(sb: SupabaseClient, lessonId: number, notes: string) {
+  const { error } = await sb.from("lessons").update({ notes }).eq("id", lessonId);
+  if (error) throw error;
+}
