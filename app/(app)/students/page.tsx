@@ -84,11 +84,10 @@ export default function StudentsPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <p className="text-xs text-muted px-4 pt-3 -mb-1">Herhangi bir hücreye tıklayıp değiştirin, dışına tıklayınca otomatik kaydedilir.</p>
         <table className="data-table">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>#</th>
               <th>Öğrenci</th>
               <th>Okul</th>
               <th>Ders</th>
@@ -98,9 +97,9 @@ export default function StudentsPage() {
             </tr>
           </thead>
           <tbody>
-            {students.map((s) => (
+            {students.map((s, idx) => (
               <tr key={s.id} className={!s.active ? "opacity-50" : ""}>
-                <td className="text-muted">{s.id}</td>
+                <td className="text-muted">{idx + 1}</td>
                 <td>
                   <EditableCell value={s.name} onSave={(v) => saveField(s, "name", v)} />
                 </td>
