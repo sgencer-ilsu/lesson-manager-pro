@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getStudents, addStudent, updateStudentField } from "@/lib/data";
+import { getStudents, addStudent, updateStudentField, syncFutureLessonFees } from "@/lib/data";
 import type { Student } from "@/lib/types";
+import { toISODate } from "@/lib/utils";
 
 const EMPTY = { name: "", school: "", subject: "", fee: "", parent_name: "", phone: "", email: "" };
 
@@ -56,6 +57,7 @@ export default function StudentsPage() {
     if (fee === student.fee) return;
     setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, fee } : r)));
     await updateStudentField(sb, student.id, { fee });
+    await syncFutureLessonFees(sb, student.id, fee, toISODate(new Date()));
   }
 
   return (
