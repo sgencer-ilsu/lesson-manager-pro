@@ -36,6 +36,19 @@ export async function updateStudentField(
   if (error) throw error;
 }
 
+/** Bir öğrencinin ücreti değiştiğinde, değişiklik tarihinden SONRAKİ
+ *  (henüz gerçekleşmemiş) planlı derslerini yeni ücrete çeker.
+ *  Bugüne kadar olan / zaten gerçekleşmiş dersler etkilenmez. */
+export async function syncFutureLessonFees(sb: SupabaseClient, studentId: number, newFee: number, fromDateISO: string) {
+  const { error } = await sb
+    .from("planned")
+    .update({ fee: newFee })
+    .eq("student_id", studentId)
+    .eq("status", "planned")
+    .gt("lesson_date", fromDateISO);
+  if (error) throw error;
+}
+
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
 export async function materializeDue(sb: SupabaseClient) {
   const now = new Date();
@@ -92,12 +105,13 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
 
   const { data: masters, error } = await sb
     .from("planned")
-    .select("*")
+    .select("*, students(fee)")
     .eq("recurring", true)
     .is("parent_plan_id", null);
   if (error) throw error;
 
   for (const m of masters || []) {
+    const currentFee = (m as any).students?.fee ?? m.fee;
     const masterDate = new Date(`${m.lesson_date}T00:00:00`);
     const weekday = m.weekday ?? (masterDate.getDay() + 6) % 7;
     const recEnd = m.recurrence_end ? new Date(`${m.recurrence_end}T00:00:00`) : end;
@@ -118,7 +132,7 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
             student_id: m.student_id,
             lesson_date: dISO,
             lesson_time: m.lesson_time,
-            fee: m.fee,
+            fee: currentFee,
             note: m.note,
             recurring: false,
             weekday,
