@@ -49,6 +49,18 @@ export async function materializeDue(sb: SupabaseClient) {
   for (const r of rows || []) {
     const dt = new Date(`${r.lesson_date}T${r.lesson_time}:00`);
     if (dt <= now) {
+      // Bu satırı "ele geçirmeyi" dene: sadece hâlâ 'planned' durumundaysa
+      // 'materializing' yap. Başka bir sekme/istemci aynı anda aynı işlemi
+      // yapmaya çalışıyorsa, bu güncelleme onda 0 satır etkiler ve o taraf
+      // atlar — böylece aynı ders iki kez oluşturulamaz.
+      const { data: claimed } = await sb
+        .from("planned")
+        .update({ status: "materializing" })
+        .eq("id", r.id)
+        .eq("status", "planned")
+        .select("id");
+      if (!claimed || claimed.length === 0) continue;
+
       const fee = r.fee || (r as any).students?.fee || 0;
       const { data: inserted, error: insErr } = await sb
         .from("lessons")
