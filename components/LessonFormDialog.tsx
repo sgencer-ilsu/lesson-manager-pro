@@ -62,7 +62,7 @@ export default function LessonFormDialog({
   function handleStudentChange(id: number) {
     setStudentId(id);
     const s = students.find((s) => s.id === id);
-    if (s && !isEdit) setFee(String(s.fee || ""));
+    if (s) setFee(String(s.fee || ""));
   }
 
   function submit() {
