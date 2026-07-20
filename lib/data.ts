@@ -504,12 +504,13 @@ export async function quickAddLesson(
 export type MonthlyEarning = { monthKey: string; total: number };
 
 /** Son `monthsBack` ay için (bu ay dahil) yapılan derslerin toplam ücretini döner. */
-/** İlk dersten (uygulamanın gerçekten kullanılmaya başladığı aydan) bugüne
- *  kadar her ayın toplam kazancını döner. Veri olmayan geçmiş aylar hiç
- *  gösterilmez; yeni aylar geldikçe liste otomatik uzar. */
+/** İlk plandan (uygulamanın gerçekten kullanılmaya başladığı aydan) bugüne
+ *  kadar her ayın TAHMİNİ toplam gelirini (o ay için planlanan tüm derslerin
+ *  toplam ücreti, yapılmış/yapılmamış fark etmeksizin) döner. Veri olmayan
+ *  geçmiş aylar hiç gösterilmez; yeni aylar geldikçe liste otomatik uzar. */
 export async function getMonthlyEarnings(sb: SupabaseClient): Promise<MonthlyEarning[]> {
   const { data: firstRow } = await sb
-    .from("lessons")
+    .from("planned")
     .select("lesson_date")
     .order("lesson_date", { ascending: true })
     .limit(1)
@@ -527,7 +528,7 @@ export async function getMonthlyEarnings(sb: SupabaseClient): Promise<MonthlyEar
   const start = new Date(startYear, startMonth, 1);
   const startISO = toISODate(start);
 
-  const { data, error } = await sb.from("lessons").select("lesson_date, fee").gte("lesson_date", startISO);
+  const { data, error } = await sb.from("planned").select("lesson_date, fee").gte("lesson_date", startISO);
   if (error) throw error;
 
   const totals = new Map<string, number>();
