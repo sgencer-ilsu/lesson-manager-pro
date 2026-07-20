@@ -504,19 +504,39 @@ export async function quickAddLesson(
 export type MonthlyEarning = { monthKey: string; total: number };
 
 /** Son `monthsBack` ay için (bu ay dahil) yapılan derslerin toplam ücretini döner. */
-export async function getMonthlyEarnings(sb: SupabaseClient, monthsBack = 6): Promise<MonthlyEarning[]> {
+/** İlk dersten (uygulamanın gerçekten kullanılmaya başladığı aydan) bugüne
+ *  kadar her ayın toplam kazancını döner. Veri olmayan geçmiş aylar hiç
+ *  gösterilmez; yeni aylar geldikçe liste otomatik uzar. */
+export async function getMonthlyEarnings(sb: SupabaseClient): Promise<MonthlyEarning[]> {
+  const { data: firstRow } = await sb
+    .from("lessons")
+    .select("lesson_date")
+    .order("lesson_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
   const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth() - (monthsBack - 1), 1);
+  let startYear = today.getFullYear();
+  let startMonth = today.getMonth();
+  if (firstRow?.lesson_date) {
+    const d = new Date(`${firstRow.lesson_date}T00:00:00`);
+    startYear = d.getFullYear();
+    startMonth = d.getMonth();
+  }
+
+  const start = new Date(startYear, startMonth, 1);
   const startISO = toISODate(start);
 
   const { data, error } = await sb.from("lessons").select("lesson_date, fee").gte("lesson_date", startISO);
   if (error) throw error;
 
   const totals = new Map<string, number>();
-  for (let i = 0; i < monthsBack; i++) {
-    const d = new Date(today.getFullYear(), today.getMonth() - (monthsBack - 1) + i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const cursor = new Date(startYear, startMonth, 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 1);
+  while (cursor <= end) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
     totals.set(key, 0);
+    cursor.setMonth(cursor.getMonth() + 1);
   }
   for (const row of data || []) {
     const key = row.lesson_date.slice(0, 7);
