@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import { getMonthlyEarnings, type MonthlyEarning } from "@/lib/data";
 import { TR_MONTHS_SHORT, money } from "@/lib/utils";
@@ -9,7 +9,7 @@ import { TR_MONTHS_SHORT, money } from "@/lib/utils";
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div className="rounded-lg border border-[#26364f] bg-[#101828] px-3 py-2 shadow-lg">
+    <div className="rounded-xl border border-[#26364f] bg-[#101828] px-3 py-2 shadow-xl backdrop-blur-sm">
       <div className="text-[11px] text-muted mb-0.5">{label}</div>
       <div className="text-sm font-bold text-white">{money(payload[0].value)}</div>
     </div>
@@ -22,7 +22,7 @@ export default function MonthlyEarningsChart() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getMonthlyEarnings(sb, 6)
+    getMonthlyEarnings(sb)
       .then(setRows)
       .finally(() => setLoading(false));
   }, [sb]);
@@ -50,15 +50,19 @@ export default function MonthlyEarningsChart() {
       <div className="text-lg font-bold text-white mb-2">{loading ? "…" : money(currentTotal)}</div>
 
       {loading ? (
-        <div className="h-[130px] flex items-center justify-center text-sm text-muted">Yükleniyor…</div>
+        <div className="h-[150px] flex items-center justify-center text-sm text-muted">Yükleniyor…</div>
       ) : (
-        <div className="h-[130px]">
+        <div className="h-[150px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
+            <BarChart data={chartData} margin={{ top: 6, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
               <defs>
-                <linearGradient id="earningsLine" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#2563eb" />
-                  <stop offset="100%" stopColor="#9333ea" />
+                <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#9333ea" />
+                  <stop offset="100%" stopColor="#2563eb" />
+                </linearGradient>
+                <linearGradient id="barFillLast" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#a855f7" />
+                  <stop offset="100%" stopColor="#3b82f6" />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="#1c2740" strokeDasharray="3 3" vertical={false} />
@@ -71,16 +75,13 @@ export default function MonthlyEarningsChart() {
                 width={38}
                 tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
               />
-              <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#2a3d63", strokeWidth: 1 }} />
-              <Line
-                type="monotone"
-                dataKey="total"
-                stroke="url(#earningsLine)"
-                strokeWidth={2.5}
-                dot={{ r: 3.5, fill: "#0f172a", stroke: "#7c3aed", strokeWidth: 2 }}
-                activeDot={{ r: 5.5, fill: "#7c3aed" }}
-              />
-            </LineChart>
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(124,58,237,0.08)" }} />
+              <Bar dataKey="total" radius={[8, 8, 3, 3]} maxBarSize={44} animationDuration={650} animationEasing="ease-out">
+                {chartData.map((_, i) => (
+                  <Cell key={i} fill={i === chartData.length - 1 ? "url(#barFillLast)" : "url(#barFill)"} />
+                ))}
+              </Bar>
+            </BarChart>
           </ResponsiveContainer>
         </div>
       )}
