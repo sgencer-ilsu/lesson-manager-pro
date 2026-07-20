@@ -52,37 +52,40 @@ export default function MonthlyEarningsChart() {
       {loading ? (
         <div className="h-[150px] flex items-center justify-center text-sm text-muted">Yükleniyor…</div>
       ) : (
-        <div className="h-[150px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 6, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
-              <defs>
-                <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#9333ea" />
-                  <stop offset="100%" stopColor="#2563eb" />
-                </linearGradient>
-                <linearGradient id="barFillLast" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#a855f7" />
-                  <stop offset="100%" stopColor="#3b82f6" />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#1c2740" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" stroke="#64748b" fontSize={10} tickLine={false} axisLine={{ stroke: "#26364f" }} />
-              <YAxis
-                stroke="#64748b"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                width={38}
-                tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
-              />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(124,58,237,0.08)" }} />
-              <Bar dataKey="total" radius={[8, 8, 3, 3]} maxBarSize={44} animationDuration={650} animationEasing="ease-out">
-                {chartData.map((_, i) => (
-                  <Cell key={i} fill={i === chartData.length - 1 ? "url(#barFillLast)" : "url(#barFill)"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="h-[150px] w-full overflow-x-auto">
+          <div style={{ width: Math.max(chartData.length * 90, 220), height: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 6, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
+                <defs>
+                  <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#9333ea" />
+                    <stop offset="100%" stopColor="#2563eb" />
+                  </linearGradient>
+                  <linearGradient id="barFillLast" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#a855f7" />
+                    <stop offset="100%" stopColor="#3b82f6" />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#1c2740" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} fontWeight={600} tickLine={false} axisLine={{ stroke: "#26364f" }} />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  fontWeight={600}
+                  tickLine={false}
+                  axisLine={false}
+                  width={42}
+                  tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(124,58,237,0.08)" }} />
+                <Bar dataKey="total" radius={[8, 8, 3, 3]} maxBarSize={44} animationDuration={650} animationEasing="ease-out">
+                  {chartData.map((_, i) => (
+                    <Cell key={i} fill={i === chartData.length - 1 ? "url(#barFillLast)" : "url(#barFill)"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
     </div>
