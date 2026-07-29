@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const oauth2Client = getOAuth2Client(origin);
     oauth2Client.setCredentials({ refresh_token: tokenRow.refresh_token });
     const cal = google.calendar({ version: "v3", auth: oauth2Client });
-    await cal.calendarList.get({ calendarId: "primary" });
+    await cal.events.list({ calendarId: "primary", maxResults: 1 });
     return NextResponse.json({ connected: true });
   } catch {
     return NextResponse.json({ connected: false, tokenExpired: true });
