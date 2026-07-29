@@ -178,7 +178,7 @@ export default function StudentsPage() {
               <ModalField label="Öğrenci Adı *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} autoFocus />
               <ModalField label="Okul" value={form.school} onChange={(v) => setForm({ ...form, school: v })} />
               <ModalField label="Ders" value={form.subject} onChange={(v) => setForm({ ...form, subject: v })} />
-              <ModalField label="90 dk Ücreti (TL)" value={form.fee} onChange={(v) => setForm({ ...form, fee: v })} type="number" />
+              <ModalField label="90 dk Ücreti (TL)" value={form.fee} onChange={(v) => setForm({ ...form, fee: v })} inputMode="numeric" />
               <ModalField label="Veli Adı" value={form.parent_name} onChange={(v) => setForm({ ...form, parent_name: v })} />
               <ModalField label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
               <ModalField label="E-posta" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
@@ -224,9 +224,9 @@ function EditableCell({ value, onSave, suffix }: { value: string; onSave: (v: st
 }
 
 function ModalField({
-  label, value, onChange, type = "text", autoFocus,
+  label, value, onChange, type = "text", inputMode, autoFocus,
 }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; autoFocus?: boolean;
+  label: string; value: string; onChange: (v: string) => void; type?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"]; autoFocus?: boolean;
 }) {
   return (
     <div>
@@ -234,6 +234,7 @@ function ModalField({
       <input
         className="input"
         type={type}
+        inputMode={inputMode}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoFocus={autoFocus}
