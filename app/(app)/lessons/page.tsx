@@ -2,167 +2,174 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getStudents, addStudent, updateStudentField, getStudentsForMonth, setMonthlyFee } from "@/lib/data";
+import { getActiveStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
+import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
-import { monthKey as currentMonthKey } from "@/lib/utils";
+import { money, monthKey } from "@/lib/utils";
 import MonthPicker from "@/components/MonthPicker";
 
-const EMPTY = { name: "", school: "", subject: "", fee: "", parent_name: "", phone: "", email: "" };
+function StatChip({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" }) {
+  const valueColor = tone === "emerald" ? "text-emerald-300" : tone === "amber" ? "text-amber-300" : "text-white";
+  return (
+    <div className="rounded-xl border border-[#1f2a40] bg-[#101828] px-4 py-2.5 min-w-[110px]">
+      <div className="text-[11px] text-muted font-medium">{label}</div>
+      <div className={`text-base font-bold ${valueColor}`}>{value}</div>
+    </div>
+  );
+}
 
-type StudentWithMonthFee = Student & { monthFee: number };
-
-export default function StudentsPage() {
+export default function LessonsPage() {
   const sb = createClient();
-  const [month, setMonth] = useState(currentMonthKey());
-  const [students, setStudents] = useState<StudentWithMonthFee[]>([]);
-  const [form, setForm] = useState(EMPTY);
-  const [active, setActive] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  async function load(m: string) {
-    setStudents(await getStudentsForMonth(sb, m));
-  }
+  const [students, setStudents] = useState<Student[]>([]);
+  const [month, setMonth] = useState(monthKey());
+  const [studentId, setStudentId] = useState<number | null>(null);
+  const [paidFilter, setPaidFilter] = useState<"Tümü" | "Ödendi" | "Ödenmedi" | "Planlandı">("Tümü");
+  const [rows, setRows] = useState<LessonRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    load(month);
+    getActiveStudents(sb).then(setStudents);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, []);
 
-  async function save() {
-    if (!form.name.trim()) return;
-    setSaving(true);
+  async function filter() {
+    setLoading(true);
     try {
-      await addStudent(sb, {
-        name: form.name.trim(),
-        school: form.school,
-        subject: form.subject,
-        fee: parseFloat(form.fee || "0") || 0,
-        parent_name: form.parent_name,
-        phone: form.phone,
-        email: form.email,
-        active,
-      });
-      setForm(EMPTY);
-      setActive(true);
-      await load(month);
+      setRows(await getLessonRows(sb, month, studentId, paidFilter));
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   }
 
-  async function saveField(student: Student, field: "name" | "school" | "subject" | "parent_name" | "phone", value: string) {
-    if (value === (student[field] as string)) return;
-    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, [field]: value } : r)));
-    await updateStudentField(sb, student.id, { [field]: value });
+  useEffect(() => {
+    filter();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function toggleTopic(row: LessonRow, newTopic: string) {
+    if (row.row_type === "lesson") {
+      await updateLessonTopic(sb, row.row_id, newTopic);
+    } else {
+      await updatePlannedTopic(sb, row.row_id, newTopic);
+    }
+    setRows((rs) => rs.map((r) => (r === row ? { ...r, topic: newTopic } : r)));
   }
 
-  async function saveMonthFee(student: StudentWithMonthFee, raw: string) {
-    const fee = parseFloat(raw.replace(/[^0-9.]/g, "")) || 0;
-    if (fee === student.monthFee) return;
-    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, monthFee: fee } : r)));
-    await setMonthlyFee(sb, student.id, month, fee);
+  async function togglePaid(row: LessonRow) {
+    if (row.row_type !== "lesson") return;
+    const next = !row.paid;
+    await updateLessonPaid(sb, row.row_id, next);
+    setRows((rs) => rs.map((r) => (r === row ? { ...r, paid: next } : r)));
   }
+
+  const total = rows.reduce((a, r) => a + (r.fee || 0), 0);
+  const done = rows.filter((r) => r.row_type === "lesson").reduce((a, r) => a + (r.fee || 0), 0);
+  const planned = rows.filter((r) => r.row_type === "planned").reduce((a, r) => a + (r.fee || 0), 0);
+  const studentName = studentId ? students.find((s) => s.id === studentId)?.name || null : null;
 
   return (
-    <div className="max-w-[1100px] space-y-6">
-      <h1 className="text-2xl font-bold text-white">Öğrenciler</h1>
+    <div className="max-w-[1200px] space-y-5">
+      <h1 className="text-2xl font-bold text-white">Dersler</h1>
 
-      <div className="card p-5">
-        <div className="grid grid-cols-4 gap-4 mb-3">
-          <Field label="Öğrenci Adı" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-          <Field label="Okul" value={form.school} onChange={(v) => setForm({ ...form, school: v })} />
-          <Field label="Ders" value={form.subject} onChange={(v) => setForm({ ...form, subject: v })} />
-          <Field label="90 dk Ücreti" value={form.fee} onChange={(v) => setForm({ ...form, fee: v })} />
+      <div className="card p-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Ay</label>
+            <MonthPicker value={month} onChange={setMonth} />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Öğrenci</label>
+            <select className="input w-[180px]" value={studentId ?? 0} onChange={(e) => setStudentId(Number(e.target.value) || null)}>
+              <option value={0}>Tümü</option>
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Ödeme</label>
+            <select className="input w-[140px]" value={paidFilter} onChange={(e) => setPaidFilter(e.target.value as any)}>
+              <option>Tümü</option>
+              <option>Ödendi</option>
+              <option>Ödenmedi</option>
+              <option>Planlandı</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2 ml-auto">
+            <button className="btn-primary" onClick={filter} disabled={loading}>
+              {loading ? "Filtreleniyor…" : "Filtrele"}
+            </button>
+            <button className="btn" onClick={() => exportCSV(rows, `ders_raporu_${month}.csv`)}>
+              CSV Aktar
+            </button>
+            <button className="btn" onClick={() => exportPDF(rows, month, studentName)}>
+              PDF Kaydet
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-4 gap-4 mb-4 items-end">
-          <Field label="Veli Adı" value={form.parent_name} onChange={(v) => setForm({ ...form, parent_name: v })} />
-          <Field label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
-          <Field label="E-posta" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
-          <label className="flex items-center gap-2 text-sm text-muted pb-2">
-            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
-            Aktif
-          </label>
-        </div>
-        <button className="btn-primary" onClick={save} disabled={saving || !form.name.trim()}>
-          {saving ? "Kaydediliyor…" : "Yeni Öğrenci Kaydet"}
-        </button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <label className="text-xs text-muted">Ay</label>
-        <MonthPicker value={month} onChange={setMonth} />
-        <span className="text-xs text-muted">
-          Ücret sütunu bu aya ait — değiştirmezseniz bir önceki aydan devam eder.
-        </span>
+      <div className="flex flex-wrap gap-3">
+        <StatChip label="Toplam" value={money(total)} />
+        <StatChip label="Yapılan" value={money(done)} tone="emerald" />
+        <StatChip label="Planlanan" value={money(planned)} tone="amber" />
+        <StatChip label="Ders" value={String(rows.length)} />
       </div>
 
       <div className="card overflow-hidden">
         <table className="data-table">
           <thead>
             <tr>
-              <th>#</th>
+              <th>Tarih</th>
+              <th>Saat</th>
               <th>Öğrenci</th>
               <th>Okul</th>
               <th>Ders</th>
-              <th>Ücret ({month})</th>
-              <th>Veli</th>
-              <th>Telefon</th>
+              <th>Konu</th>
+              <th>Tutar</th>
+              <th>Durum</th>
             </tr>
           </thead>
           <tbody>
-            {students.map((s, idx) => (
-              <tr key={s.id} className={!s.active ? "opacity-50" : ""}>
-                <td className="text-muted">{idx + 1}</td>
+            {rows.map((r) => (
+              <tr key={`${r.row_type}-${r.row_id}`} className={r.row_type === "planned" ? "opacity-60" : ""}>
+                <td>{r.lesson_date}</td>
+                <td>{r.lesson_time}</td>
+                <td>{r.name}</td>
+                <td>{r.school}</td>
+                <td>{r.subject}</td>
                 <td>
-                  <EditableCell value={s.name} onSave={(v) => saveField(s, "name", v)} />
+                  <input
+                    key={`${r.row_type}-${r.row_id}-${r.topic}`}
+                    className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full"
+                    defaultValue={r.topic}
+                    placeholder="—"
+                    onBlur={(e) => toggleTopic(r, e.target.value)}
+                  />
                 </td>
+                <td>{money(r.fee)}</td>
                 <td>
-                  <EditableCell value={s.school} onSave={(v) => saveField(s, "school", v)} />
-                </td>
-                <td>
-                  <EditableCell value={s.subject} onSave={(v) => saveField(s, "subject", v)} />
-                </td>
-                <td>
-                  <EditableCell key={`${s.id}-${month}-${s.monthFee}`} value={String(s.monthFee ?? "")} onSave={(v) => saveMonthFee(s, v)} suffix=" TL" />
-                </td>
-                <td>
-                  <EditableCell value={s.parent_name} onSave={(v) => saveField(s, "parent_name", v)} />
-                </td>
-                <td>
-                  <EditableCell value={s.phone} onSave={(v) => saveField(s, "phone", v)} />
+                  {r.row_type === "planned" ? (
+                    "Planlandı"
+                  ) : (
+                    <button
+                      onClick={() => togglePaid(r)}
+                      className={`text-xs font-semibold px-2 py-1 rounded-full ${r.paid ? "bg-emerald-900/40 text-emerald-300" : "bg-amber-900/40 text-amber-300"}`}
+                      title="Ödeme durumunu değiştirmek için tıkla"
+                    >
+                      {r.paid ? "Ödendi" : "Ödenmedi"}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {students.length === 0 && <p className="text-sm text-muted p-5">Henüz öğrenci yok.</p>}
+        {rows.length === 0 && <p className="text-sm text-muted p-5">Kayıt bulunamadı.</p>}
       </div>
-    </div>
-  );
-}
-
-function EditableCell({ value, onSave, suffix }: { value: string; onSave: (v: string) => void; suffix?: string }) {
-  return (
-    <div className="flex items-center gap-1">
-      <input
-        className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full py-0.5"
-        defaultValue={value}
-        placeholder="—"
-        onBlur={(e) => onSave(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        }}
-      />
-      {suffix && <span className="text-muted shrink-0">{suffix}</span>}
-    </div>
-  );
-}
-
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div>
-      <label className="block text-xs text-muted mb-1">{label}</label>
-      <input className="input" value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
