@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ensureRecurringInstances, materializeDue } from "@/lib/data";
 import SidebarAgenda from "./SidebarAgenda";
 
 const NAV = [
@@ -22,6 +24,25 @@ export default function Sidebar() {
     router.push("/login");
     router.refresh();
   }
+
+  // Sidebar tüm sayfalarda ortak olduğu için, zamanı geçen planlı dersleri
+  // "yapıldı" olarak işaretleme işlemini burada çalıştırıyoruz — böylece
+  // sadece Dashboard'a değil, hangi sayfada olursanız olun tetiklenir.
+  useEffect(() => {
+    async function run() {
+      try {
+        await ensureRecurringInstances(supabase);
+        await materializeDue(supabase);
+        fetch("/api/google/resync", { method: "POST" }).catch(() => {});
+      } catch {
+        // sessizce geç — bir sonraki tetiklemede tekrar denenecek
+      }
+    }
+    run();
+    const interval = setInterval(run, 60000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <aside className="w-[260px] shrink-0 border-r border-[#1a2338] bg-[#0c1424] flex flex-col py-5 px-3 h-screen sticky top-0 overflow-hidden">
