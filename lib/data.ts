@@ -36,18 +36,57 @@ export async function updateStudentField(
   if (error) throw error;
 }
 
-/** Bir öğrencinin ücreti değiştiğinde, değişiklik tarihinden SONRAKİ
- *  (henüz gerçekleşmemiş) planlı derslerini yeni ücrete çeker.
- *  Bugüne kadar olan / zaten gerçekleşmiş dersler etkilenmez. */
-export async function syncFutureLessonFees(sb: SupabaseClient, studentId: number, newFee: number, fromDateISO: string) {
-  const { error } = await sb
-    .from("planned")
-    .update({ fee: newFee })
+// ============ AYLIK ÜCRETLER (öncelikli fiyatlandırma) ============
+
+/** Bir öğrencinin belirli bir ay için geçerli ücretini bulur: o aya veya
+ *  öncesine ait en yakın kayıtlı özel ücreti kullanır ("önceki aydakiler
+ *  aynen devam eder"); hiç özel kayıt yoksa öğrencinin temel ücretine döner. */
+export async function getEffectiveFee(sb: SupabaseClient, studentId: number, monthKeyStr: string): Promise<number> {
+  const { data, error } = await sb
+    .from("student_monthly_fees")
+    .select("fee")
     .eq("student_id", studentId)
-    .eq("status", "planned")
-    .gt("lesson_date", fromDateISO);
+    .lte("month_key", monthKeyStr)
+    .order("month_key", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data.fee;
+  const { data: student } = await sb.from("students").select("fee").eq("id", studentId).maybeSingle();
+  return student?.fee || 0;
+}
+
+/** Aktif öğrencileri, seçilen ay için geçerli ücretleriyle birlikte döner. */
+export async function getStudentsForMonth(
+  sb: SupabaseClient,
+  monthKeyStr: string
+): Promise<(Student & { monthFee: number })[]> {
+  const students = await getActiveStudents(sb);
+  const { data: feeRows, error } = await sb
+    .from("student_monthly_fees")
+    .select("student_id, month_key, fee")
+    .lte("month_key", monthKeyStr)
+    .order("month_key", { ascending: false });
+  if (error) throw error;
+
+  const latestByStudent = new Map<number, number>();
+  for (const row of feeRows || []) {
+    if (!latestByStudent.has(row.student_id)) latestByStudent.set(row.student_id, row.fee);
+  }
+
+  return students.map((s) => ({ ...s, monthFee: latestByStudent.get(s.id) ?? s.fee }));
+}
+
+/** Bir öğrencinin belirli bir ay için ücretini kaydeder (yoksa oluşturur).
+ *  O aydan itibaren, yeni bir ay için ayrıca değiştirilene kadar geçerli olur. */
+export async function setMonthlyFee(sb: SupabaseClient, studentId: number, monthKeyStr: string, fee: number) {
+  const { error } = await sb
+    .from("student_monthly_fees")
+    .upsert({ student_id: studentId, month_key: monthKeyStr, fee }, { onConflict: "student_id,month_key" });
   if (error) throw error;
 }
+
+// ============ RECURRING / MATERIALIZATION (kron işleri) ============
 
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
 export async function materializeDue(sb: SupabaseClient) {
@@ -96,7 +135,8 @@ export async function materializeDue(sb: SupabaseClient) {
   }
 }
 
-/** Tekrarlayan (haftalık) planların ileriki/geçmiş 90 günlük tekil kayıtlarını oluşturur. */
+/** Tekrarlayan (haftalık) planların ileriki/geçmiş 90 günlük tekil kayıtlarını oluşturur.
+ *  Her yeni kayıt, kendi tarihinin ait olduğu ayın geçerli (aylık) ücretini kullanır. */
 export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 90) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -105,13 +145,12 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
 
   const { data: masters, error } = await sb
     .from("planned")
-    .select("*, students(fee)")
+    .select("*")
     .eq("recurring", true)
     .is("parent_plan_id", null);
   if (error) throw error;
 
   for (const m of masters || []) {
-    const currentFee = (m as any).students?.fee ?? m.fee;
     const masterDate = new Date(`${m.lesson_date}T00:00:00`);
     const weekday = m.weekday ?? (masterDate.getDay() + 6) % 7;
     const recEnd = m.recurrence_end ? new Date(`${m.recurrence_end}T00:00:00`) : end;
@@ -128,11 +167,12 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
           .eq("lesson_date", dISO)
           .maybeSingle();
         if (!exists) {
+          const instanceFee = await getEffectiveFee(sb, m.student_id, dISO.slice(0, 7));
           await sb.from("planned").insert({
             student_id: m.student_id,
             lesson_date: dISO,
             lesson_time: m.lesson_time,
-            fee: currentFee,
+            fee: instanceFee,
             note: m.note,
             recurring: false,
             weekday,
@@ -456,7 +496,7 @@ export async function getLessonRows(
   if (paidFilter === "Tümü" || paidFilter === "Planlandı") {
     let q = sb
       .from("planned")
-      .select("id,lesson_date,lesson_time,fee,students(name,school,subject)")
+      .select("id,lesson_date,lesson_time,fee,note,students(name,school,subject)")
       .gte("lesson_date", start)
       .lt("lesson_date", end)
       .is("materialized_lesson_id", null)
@@ -466,7 +506,7 @@ export async function getLessonRows(
     if (error) throw error;
     for (const r of data || []) {
       const s: any = (r as any).students;
-      rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: "", fee: r.fee, paid: false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
+      rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: (r as any).note || "", fee: r.fee, paid: false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
     }
   }
 
@@ -476,6 +516,12 @@ export async function getLessonRows(
 
 export async function updateLessonTopic(sb: SupabaseClient, lessonId: number, topic: string) {
   await sb.from("lessons").update({ topic }).eq("id", lessonId);
+}
+
+/** Henüz gerçekleşmemiş (planlı) bir dersin konu/not alanını günceller,
+ *  böylece ay bitmeden veliye gönderilecek raporda görünebilir. */
+export async function updatePlannedTopic(sb: SupabaseClient, plannedId: number, note: string) {
+  await sb.from("planned").update({ note }).eq("id", plannedId);
 }
 
 export async function updateLessonPaid(sb: SupabaseClient, lessonId: number, paid: boolean) {
@@ -503,7 +549,6 @@ export async function quickAddLesson(
 
 export type MonthlyEarning = { monthKey: string; total: number };
 
-/** Son `monthsBack` ay için (bu ay dahil) yapılan derslerin toplam ücretini döner. */
 /** İlk plandan (uygulamanın gerçekten kullanılmaya başladığı aydan) bugüne
  *  kadar her ayın TAHMİNİ toplam gelirini (o ay için planlanan tüm derslerin
  *  toplam ücreti, yapılmış/yapılmamış fark etmeksizin) döner. Veri olmayan
