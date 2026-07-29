@@ -2,27 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getStudents, addStudent, updateStudentField, syncFutureLessonFees } from "@/lib/data";
+import { getStudents, addStudent, updateStudentField, getStudentsForMonth, setMonthlyFee } from "@/lib/data";
 import type { Student } from "@/lib/types";
-import { toISODate } from "@/lib/utils";
+import { monthKey as currentMonthKey } from "@/lib/utils";
 
 const EMPTY = { name: "", school: "", subject: "", fee: "", parent_name: "", phone: "", email: "" };
 
+type StudentWithMonthFee = Student & { monthFee: number };
+
 export default function StudentsPage() {
   const sb = createClient();
-  const [students, setStudents] = useState<Student[]>([]);
+  const [month, setMonth] = useState(currentMonthKey());
+  const [students, setStudents] = useState<StudentWithMonthFee[]>([]);
   const [form, setForm] = useState(EMPTY);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  async function load() {
-    setStudents(await getStudents(sb));
+  async function load(m: string) {
+    setStudents(await getStudentsForMonth(sb, m));
   }
 
   useEffect(() => {
-    load();
+    load(month);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [month]);
 
   async function save() {
     if (!form.name.trim()) return;
@@ -40,7 +43,7 @@ export default function StudentsPage() {
       });
       setForm(EMPTY);
       setActive(true);
-      await load();
+      await load(month);
     } finally {
       setSaving(false);
     }
@@ -52,12 +55,11 @@ export default function StudentsPage() {
     await updateStudentField(sb, student.id, { [field]: value });
   }
 
-  async function saveFee(student: Student, raw: string) {
+  async function saveMonthFee(student: StudentWithMonthFee, raw: string) {
     const fee = parseFloat(raw.replace(/[^0-9.]/g, "")) || 0;
-    if (fee === student.fee) return;
-    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, fee } : r)));
-    await updateStudentField(sb, student.id, { fee });
-    await syncFutureLessonFees(sb, student.id, fee, toISODate(new Date()));
+    if (fee === student.monthFee) return;
+    setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, monthFee: fee } : r)));
+    await setMonthlyFee(sb, student.id, month, fee);
   }
 
   return (
@@ -85,6 +87,14 @@ export default function StudentsPage() {
         </button>
       </div>
 
+      <div className="flex items-center gap-3">
+        <label className="text-xs text-muted">Ay</label>
+        <input className="input w-[130px]" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
+        <span className="text-xs text-muted">
+          Ücret sütunu bu aya ait — bir ay için değiştirmezseniz bir önceki aydan devam eder.
+        </span>
+      </div>
+
       <div className="card overflow-hidden">
         <table className="data-table">
           <thead>
@@ -93,7 +103,7 @@ export default function StudentsPage() {
               <th>Öğrenci</th>
               <th>Okul</th>
               <th>Ders</th>
-              <th>Ücret</th>
+              <th>Ücret ({month})</th>
               <th>Veli</th>
               <th>Telefon</th>
             </tr>
@@ -112,7 +122,7 @@ export default function StudentsPage() {
                   <EditableCell value={s.subject} onSave={(v) => saveField(s, "subject", v)} />
                 </td>
                 <td>
-                  <EditableCell value={String(s.fee ?? "")} onSave={(v) => saveFee(s, v)} suffix=" TL" />
+                  <EditableCell key={`${s.id}-${month}-${s.monthFee}`} value={String(s.monthFee ?? "")} onSave={(v) => saveMonthFee(s, v)} suffix=" TL" />
                 </td>
                 <td>
                   <EditableCell value={s.parent_name} onSave={(v) => saveField(s, "parent_name", v)} />
