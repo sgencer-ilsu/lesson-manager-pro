@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,8 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const [googleOk, setGoogleOk] = useState<boolean | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -25,9 +27,26 @@ export default function Sidebar() {
     router.refresh();
   }
 
-  // Sidebar tüm sayfalarda ortak olduğu için, zamanı geçen planlı dersleri
-  // "yapıldı" olarak işaretleme işlemini burada çalıştırıyoruz — böylece
-  // sadece Dashboard'a değil, hangi sayfada olursanız olun tetiklenir.
+  async function checkGoogle() {
+    try {
+      const res = await fetch("/api/google/status");
+      const json = await res.json();
+      setGoogleOk(json.connected === true);
+    } catch {
+      setGoogleOk(false);
+    }
+  }
+
+  async function manualResync() {
+    setSyncing(true);
+    try {
+      await fetch("/api/google/resync", { method: "POST" });
+      await checkGoogle();
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   useEffect(() => {
     async function run() {
       try {
@@ -39,6 +58,7 @@ export default function Sidebar() {
       }
     }
     run();
+    checkGoogle();
     const interval = setInterval(run, 60000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,6 +88,29 @@ export default function Sidebar() {
       </nav>
 
       <SidebarAgenda />
+
+      {/* Google Takvim durumu */}
+      <div className="mt-3 px-2 shrink-0">
+        {googleOk === false ? (
+          <div className="rounded-lg bg-red-950/50 border border-red-800/50 px-3 py-2 text-xs">
+            <div className="text-red-300 font-semibold mb-1">⚠ Google Takvim bağlı değil</div>
+            <a
+              href="/api/google/connect"
+              className="text-blue-400 underline hover:text-blue-300"
+            >
+              Yeniden bağlan
+            </a>
+          </div>
+        ) : googleOk === true ? (
+          <button
+            onClick={manualResync}
+            disabled={syncing}
+            className="w-full text-left text-[11px] text-muted hover:text-white px-1 py-1 transition-colors"
+          >
+            {syncing ? "⏳ Senkronize ediliyor…" : "✓ Google Takvim bağlı · Sync"}
+          </button>
+        ) : null}
+      </div>
 
       <div className="border-t border-[#1a2338] mt-3 pt-3 shrink-0">
         <button onClick={signOut} className="nav-btn w-full text-red-300 hover:text-red-200 hover:bg-[#241621]">
