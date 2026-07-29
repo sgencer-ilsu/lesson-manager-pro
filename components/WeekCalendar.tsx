@@ -24,10 +24,12 @@ type PendingAction =
 export default function WeekCalendar({
   weekStart,
   compact = false,
+  visibleDays = 7,
   onChanged,
 }: {
   weekStart: Date;
   compact?: boolean;
+  visibleDays?: number;
   onChanged?: () => void;
 }) {
   const sb = useMemo(() => createClient(), []);
@@ -43,10 +45,10 @@ export default function WeekCalendar({
   const leftPx = 50;
 
   const load = useCallback(async () => {
-    const end = addDays(weekStart, 6);
+    const end = addDays(weekStart, visibleDays - 1);
     const rows = await getWeekEvents(sb, toISODate(weekStart), toISODate(end));
     setEvents(rows);
-  }, [sb, weekStart]);
+  }, [sb, weekStart, visibleDays]);
 
   useEffect(() => {
     load();
@@ -154,7 +156,7 @@ export default function WeekCalendar({
   const today = toISODate(new Date());
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const weekDates = Array.from({ length: visibleDays }, (_, i) => addDays(weekStart, i));
   const weekISOs = weekDates.map(toISODate);
   const showNowLine = weekISOs.includes(today);
 
@@ -170,7 +172,7 @@ export default function WeekCalendar({
               className="flex-1 text-center text-xs font-bold py-2 rounded-t-md"
               style={{ background: isToday ? "#1d4ed8" : "#172033", color: "#e5e7eb", height: headerPx }}
             >
-              {DAY_NAMES[i]} {d.getDate()}
+              {DAY_NAMES[(new Date(d).getDay() + 6) % 7]} {d.getDate()}
             </div>
           );
         })}
