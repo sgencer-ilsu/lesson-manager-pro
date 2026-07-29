@@ -172,32 +172,34 @@ export default function StudentsPage() {
       {/* Modal */}
       {showModal && (
         <div className="modal-backdrop !items-end md:!items-center !pb-0 md:!pb-5" onClick={() => setShowModal(false)}>
-          <div className="modal !rounded-b-none md:!rounded-2xl w-full md:max-w-[440px] overflow-y-auto max-h-[85vh] pb-20 md:pb-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-white font-bold text-lg mb-5">Yeni Öğrenci</h3>
-            <div className="space-y-3">
-              <ModalField label="Öğrenci Adı *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-              <ModalField label="Okul" value={form.school} onChange={(v) => setForm({ ...form, school: v })} />
-              <ModalField label="Ders" value={form.subject} onChange={(v) => setForm({ ...form, subject: v })} />
-              <ModalField label="90 dk Ücreti (TL)" value={form.fee} onChange={(v) => setForm({ ...form, fee: v })} inputMode="numeric" />
-              <ModalField label="Veli Adı" value={form.parent_name} onChange={(v) => setForm({ ...form, parent_name: v })} />
-              <ModalField label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
-              <ModalField label="E-posta" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
-              <label className="flex items-center gap-2 text-sm text-muted pt-1">
-                <input type="checkbox" checked={formActive} onChange={(e) => setFormActive(e.target.checked)} />
-                Aktif öğrenci
-              </label>
+          <div
+            className="w-full md:max-w-[440px] bg-[#101828] border border-[#24314c] rounded-t-2xl md:rounded-2xl flex flex-col"
+            style={{ maxHeight: "75vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Scroll edilebilir içerik */}
+            <div className="overflow-y-auto px-6 pt-6 pb-2 flex-1">
+              <h3 className="text-white font-bold text-lg mb-4">Yeni Öğrenci</h3>
+              <div className="space-y-3">
+                <ModalField label="Öğrenci Adı *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
+                <ModalField label="Okul" value={form.school} onChange={(v) => setForm({ ...form, school: v })} />
+                <ModalField label="Ders" value={form.subject} onChange={(v) => setForm({ ...form, subject: v })} />
+                <ModalField label="90 dk Ücreti (TL)" value={form.fee} onChange={(v) => setForm({ ...form, fee: v })} inputMode="numeric" />
+                <ModalField label="Veli Adı" value={form.parent_name} onChange={(v) => setForm({ ...form, parent_name: v })} />
+                <ModalField label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
+                <ModalField label="E-posta" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
+                <label className="flex items-center gap-2 text-sm text-muted pt-1 pb-2">
+                  <input type="checkbox" checked={formActive} onChange={(e) => setFormActive(e.target.checked)} />
+                  Aktif öğrenci
+                </label>
+              </div>
             </div>
-            <div className="flex gap-2 mt-6">
-              <button
-                className="btn-primary flex-1"
-                onClick={save}
-                disabled={saving || !form.name.trim()}
-              >
+            {/* Butonlar her zaman altta sabit */}
+            <div className="flex gap-2 px-6 py-4 border-t border-[#1a2338] shrink-0">
+              <button className="btn-primary flex-1" onClick={save} disabled={saving || !form.name.trim()}>
                 {saving ? "Kaydediliyor…" : "Ekle"}
               </button>
-              <button className="btn" onClick={() => setShowModal(false)}>
-                Vazgeç
-              </button>
+              <button className="btn" onClick={() => setShowModal(false)}>Vazgeç</button>
             </div>
           </div>
         </div>
