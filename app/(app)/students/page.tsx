@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getStudents, addStudent, updateStudentField, getStudentsForMonth, setMonthlyFee } from "@/lib/data";
 import type { Student } from "@/lib/types";
 import { monthKey as currentMonthKey } from "@/lib/utils";
+import MonthPicker from "@/components/MonthPicker";
 
 const EMPTY = { name: "", school: "", subject: "", fee: "", parent_name: "", phone: "", email: "" };
 
@@ -89,9 +90,9 @@ export default function StudentsPage() {
 
       <div className="flex items-center gap-3">
         <label className="text-xs text-muted">Ay</label>
-        <input className="input w-[130px]" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
+        <MonthPicker value={month} onChange={setMonth} />
         <span className="text-xs text-muted">
-          Ücret sütunu bu aya ait — bir ay için değiştirmezseniz bir önceki aydan devam eder.
+          Ücret sütunu bu aya ait — değiştirmezseniz bir önceki aydan devam eder.
         </span>
       </div>
 
