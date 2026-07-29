@@ -130,8 +130,8 @@ export default function LessonsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className={r.row_type === "planned" ? "opacity-60" : ""}>
+            {rows.map((r) => (
+              <tr key={`${r.row_type}-${r.row_id}`} className={r.row_type === "planned" ? "opacity-60" : ""}>
                 <td>{r.lesson_date}</td>
                 <td>{r.lesson_time}</td>
                 <td>{r.name}</td>
@@ -140,6 +140,7 @@ export default function LessonsPage() {
                 <td>
                   {r.row_type === "lesson" ? (
                     <input
+                      key={`${r.row_type}-${r.row_id}-${r.topic}`}
                       className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full"
                       defaultValue={r.topic}
                       onBlur={(e) => toggleTopic(r, e.target.value)}
