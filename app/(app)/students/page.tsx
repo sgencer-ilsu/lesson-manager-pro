@@ -187,7 +187,7 @@ export default function StudentsPage() {
         >
           <div
             className="w-full max-w-[440px] bg-[#101828] border border-[#24314c] rounded-2xl flex flex-col"
-            style={{ maxHeight: "calc(100vh - 90px)" }}
+            style={{ maxHeight: "calc(100vh - 180px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Scroll edilebilir içerik */}
