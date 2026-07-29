@@ -44,7 +44,7 @@ export default function LessonsPage() {
   useEffect(() => {
     filter();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [month, studentId, paidFilter]);
 
   async function toggleTopic(row: LessonRow, newTopic: string) {
     if (row.row_type === "lesson") {
