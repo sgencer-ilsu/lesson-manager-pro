@@ -134,8 +134,14 @@ select.input {
 }
 .btn-danger:hover { filter: brightness(1.15); }
 
+/* Tablolar mobilde yatay scroll yapsÄ±n */
+.card.overflow-hidden {
+  overflow-x: auto;
+}
+
 table.data-table {
   width: 100%;
+  min-width: 600px;
   border-collapse: collapse;
   font-size: 13.5px;
 }
