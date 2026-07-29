@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getActiveStudents, getLessonRows, updateLessonTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
+import { getActiveStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
 import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
@@ -46,8 +46,11 @@ export default function LessonsPage() {
   }, []);
 
   async function toggleTopic(row: LessonRow, newTopic: string) {
-    if (row.row_type !== "lesson") return;
-    await updateLessonTopic(sb, row.row_id, newTopic);
+    if (row.row_type === "lesson") {
+      await updateLessonTopic(sb, row.row_id, newTopic);
+    } else {
+      await updatePlannedTopic(sb, row.row_id, newTopic);
+    }
     setRows((rs) => rs.map((r) => (r === row ? { ...r, topic: newTopic } : r)));
   }
 
@@ -138,16 +141,13 @@ export default function LessonsPage() {
                 <td>{r.school}</td>
                 <td>{r.subject}</td>
                 <td>
-                  {r.row_type === "lesson" ? (
-                    <input
-                      key={`${r.row_type}-${r.row_id}-${r.topic}`}
-                      className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full"
-                      defaultValue={r.topic}
-                      onBlur={(e) => toggleTopic(r, e.target.value)}
-                    />
-                  ) : (
-                    r.topic
-                  )}
+                  <input
+                    key={`${r.row_type}-${r.row_id}-${r.topic}`}
+                    className="bg-transparent border-b border-transparent hover:border-[#2a3d63] focus:border-accent outline-none w-full"
+                    defaultValue={r.topic}
+                    placeholder="—"
+                    onBlur={(e) => toggleTopic(r, e.target.value)}
+                  />
                 </td>
                 <td>{money(r.fee)}</td>
                 <td>
