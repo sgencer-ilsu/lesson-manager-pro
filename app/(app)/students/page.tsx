@@ -172,7 +172,7 @@ export default function StudentsPage() {
       {/* Modal */}
       {showModal && (
         <div className="modal-backdrop !items-end md:!items-center !pb-0 md:!pb-5" onClick={() => setShowModal(false)}>
-          <div className="modal !rounded-b-none md:!rounded-2xl w-full md:max-w-[440px] overflow-y-auto max-h-[85vh] pb-6" onClick={(e) => e.stopPropagation()}>
+          <div className="modal !rounded-b-none md:!rounded-2xl w-full md:max-w-[440px] overflow-y-auto max-h-[85vh] pb-20 md:pb-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white font-bold text-lg mb-5">Yeni Öğrenci</h3>
             <div className="space-y-3">
               <ModalField label="Öğrenci Adı *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
