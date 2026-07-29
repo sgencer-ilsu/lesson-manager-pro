@@ -6,6 +6,7 @@ import { getActiveStudents, getLessonRows, updateLessonTopic, updatePlannedTopic
 import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
+import MonthPicker from "@/components/MonthPicker";
 
 function StatChip({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" }) {
   const valueColor = tone === "emerald" ? "text-emerald-300" : tone === "amber" ? "text-amber-300" : "text-white";
@@ -74,7 +75,7 @@ export default function LessonsPage() {
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="block text-xs text-muted mb-1.5">Ay</label>
-            <input className="input w-[130px]" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
+            <MonthPicker value={month} onChange={setMonth} />
           </div>
           <div>
             <label className="block text-xs text-muted mb-1.5">Öğrenci</label>
