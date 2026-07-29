@@ -65,6 +65,16 @@ export default function StudentsPage() {
     await setMonthlyFee(sb, student.id, month, fee);
   }
 
+  // Modal açıkken arka sayfa scroll'unu engelle
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [showModal]);
+
   async function toggleActive(student: StudentWithMonthFee) {
     const next = !student.active;
     setStudents((rows) => rows.map((r) => (r.id === student.id ? { ...r, active: next } : r)));
@@ -174,7 +184,7 @@ export default function StudentsPage() {
         <div className="modal-backdrop !items-end md:!items-center !pb-0 md:!pb-5" onClick={() => setShowModal(false)}>
           <div
             className="w-full md:max-w-[440px] bg-[#101828] border border-[#24314c] rounded-t-2xl md:rounded-2xl flex flex-col"
-            style={{ maxHeight: "75vh" }}
+            style={{ maxHeight: "60vh" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Scroll edilebilir içerik */}
