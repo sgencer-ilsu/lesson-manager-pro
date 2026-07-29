@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Student, CalendarEvent } from "@/lib/types";
-import { getActiveStudents } from "@/lib/data";
+import { getActiveStudents, getEffectiveFee } from "@/lib/data";
 import { addDays, toISODate } from "@/lib/utils";
 
 type NewMode = { mode: "new"; date: Date; time: string | null };
@@ -49,20 +49,24 @@ export default function LessonFormDialog({
   const [recurrenceEnd, setRecurrenceEnd] = useState(toISODate(addDays(new Date(), 182)));
 
   useEffect(() => {
-    getActiveStudents(sb).then((rows) => {
+    getActiveStudents(sb).then(async (rows) => {
       setStudents(rows);
       if (!isEdit && rows.length && !studentId) {
-        setStudentId(rows[0].id);
-        if (!fee) setFee(String(rows[0].fee || ""));
+        const first = rows[0];
+        setStudentId(first.id);
+        if (!fee) {
+          const f = await getEffectiveFee(sb, first.id, date.slice(0, 7));
+          setFee(String(f || ""));
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleStudentChange(id: number) {
+  async function handleStudentChange(id: number) {
     setStudentId(id);
-    const s = students.find((s) => s.id === id);
-    if (s) setFee(String(s.fee || ""));
+    const f = await getEffectiveFee(sb, id, date.slice(0, 7));
+    setFee(String(f || ""));
   }
 
   function submit() {
