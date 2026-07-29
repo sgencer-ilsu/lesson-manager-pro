@@ -30,7 +30,7 @@ export async function addStudent(
 export async function updateStudentField(
   sb: SupabaseClient,
   studentId: number,
-  fields: Partial<Pick<Student, "name" | "school" | "subject" | "fee" | "parent_name" | "phone" | "email">>
+  fields: Partial<Pick<Student, "name" | "school" | "subject" | "fee" | "parent_name" | "phone" | "email" | "active">>
 ) {
   const { error } = await sb.from("students").update(fields).eq("id", studentId);
   if (error) throw error;
