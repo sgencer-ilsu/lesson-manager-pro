@@ -181,10 +181,13 @@ export default function StudentsPage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="modal-backdrop !items-end md:!items-center !pb-0 md:!pb-5" onClick={() => setShowModal(false)}>
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center pt-4 px-4 md:items-center md:pt-0"
+          onClick={() => setShowModal(false)}
+        >
           <div
-            className="w-full md:max-w-[440px] bg-[#101828] border border-[#24314c] rounded-t-2xl md:rounded-2xl flex flex-col"
-            style={{ maxHeight: "60vh" }}
+            className="w-full max-w-[440px] bg-[#101828] border border-[#24314c] rounded-2xl flex flex-col"
+            style={{ maxHeight: "calc(100vh - 90px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Scroll edilebilir içerik */}
@@ -204,7 +207,7 @@ export default function StudentsPage() {
                 </label>
               </div>
             </div>
-            {/* Butonlar her zaman altta sabit */}
+            {/* Butonlar her zaman altta görünür */}
             <div className="flex gap-2 px-6 py-4 border-t border-[#1a2338] shrink-0">
               <button className="btn-primary flex-1" onClick={save} disabled={saving || !form.name.trim()}>
                 {saving ? "Kaydediliyor…" : "Ekle"}
