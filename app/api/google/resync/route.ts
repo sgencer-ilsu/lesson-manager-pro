@@ -105,24 +105,34 @@ export async function POST(request: Request) {
 
     try {
       if (row.google_event_id) {
-        await calendar.events.patch({ calendarId: "primary", eventId: row.google_event_id, requestBody: eventBody });
+        // Zaten event_id var → güncelle
+        try {
+          await calendar.events.patch({ calendarId: "primary", eventId: row.google_event_id, requestBody: eventBody });
+          synced++;
+        } catch {
+          // 404 ise event silinmiş, aşağıda yeniden oluşturulur
+        }
       } else {
-        const created = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
-        if (created.data.id) {
-          await supabase.from("planned").update({ google_event_id: created.data.id }).eq("id", row.id);
+        // Optimistic lock: sadece hâlâ google_event_id'si olmayan satırı güncelle
+        const { data: claimed } = await supabase
+          .from("planned")
+          .update({ google_event_id: "syncing" })
+          .eq("id", row.id)
+          .is("google_event_id", null)
+          .select("id");
+        if (!claimed || claimed.length === 0) continue; // Başka istek aldı, atla
+
+        try {
+          const created = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
+          if (created.data.id) {
+            await supabase.from("planned").update({ google_event_id: created.data.id }).eq("id", row.id);
+            synced++;
+          }
+        } catch {
+          // Hata olursa kilidi geri al
+          await supabase.from("planned").update({ google_event_id: null }).eq("id", row.id);
         }
       }
-      synced++;
-    } catch {
-      // Google'da etkinlik elle silinmişse (404) veya başka bir hata olursa yeniden oluşturmayı dene.
-      try {
-        const created = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
-        if (created.data.id) {
-          await supabase.from("planned").update({ google_event_id: created.data.id }).eq("id", row.id);
-          synced++;
-        }
-      } catch {}
-    }
   }
 
   return NextResponse.json({ connected: true, synced });
