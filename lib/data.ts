@@ -168,6 +168,8 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
           .maybeSingle();
         if (!exists) {
           const instanceFee = await getEffectiveFee(sb, m.student_id, dISO.slice(0, 7));
+          // Eş zamanlı çağrılarda aynı satırın iki kez eklenmesini önlemek için
+          // çakışma olunca yoksay (onConflict do nothing)
           await sb.from("planned").insert({
             student_id: m.student_id,
             lesson_date: dISO,
@@ -179,7 +181,7 @@ export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 9
             recurrence_end: m.recurrence_end,
             parent_plan_id: m.id,
             status: "planned",
-          });
+          }).select().maybeSingle();
         }
       }
       d = addDays(d, 7);
