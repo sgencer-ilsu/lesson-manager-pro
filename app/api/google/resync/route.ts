@@ -103,36 +103,35 @@ export async function POST(request: Request) {
       extendedProperties: { private: { appSource: APP_TAG, plannedId: String(row.id) } },
     };
 
-    try {
-      if (row.google_event_id) {
-        // Zaten event_id var → güncelle
-        try {
-          await calendar.events.patch({ calendarId: "primary", eventId: row.google_event_id, requestBody: eventBody });
-          synced++;
-        } catch {
-          // 404 ise event silinmiş, aşağıda yeniden oluşturulur
-        }
-      } else {
-        // Optimistic lock: sadece hâlâ google_event_id'si olmayan satırı güncelle
-        const { data: claimed } = await supabase
-          .from("planned")
-          .update({ google_event_id: "syncing" })
-          .eq("id", row.id)
-          .is("google_event_id", null)
-          .select("id");
-        if (!claimed || claimed.length === 0) continue; // Başka istek aldı, atla
-
-        try {
-          const created = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
-          if (created.data.id) {
-            await supabase.from("planned").update({ google_event_id: created.data.id }).eq("id", row.id);
-            synced++;
-          }
-        } catch {
-          // Hata olursa kilidi geri al
-          await supabase.from("planned").update({ google_event_id: null }).eq("id", row.id);
-        }
+    if (row.google_event_id && row.google_event_id !== "syncing") {
+      // Zaten event_id var → güncelle
+      try {
+        await calendar.events.patch({ calendarId: "primary", eventId: row.google_event_id, requestBody: eventBody });
+        synced++;
+      } catch {
+        // 404 ise event silinmiş, devam et
       }
+    } else if (!row.google_event_id) {
+      // Optimistic lock: sadece hâlâ google_event_id'si olmayan satırı güncelle
+      const { data: claimed } = await supabase
+        .from("planned")
+        .update({ google_event_id: "syncing" })
+        .eq("id", row.id)
+        .is("google_event_id", null)
+        .select("id");
+      if (!claimed || claimed.length === 0) continue; // Başka istek aldı, atla
+
+      try {
+        const created = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
+        if (created.data.id) {
+          await supabase.from("planned").update({ google_event_id: created.data.id }).eq("id", row.id);
+          synced++;
+        }
+      } catch {
+        // Hata olursa kilidi geri al
+        await supabase.from("planned").update({ google_event_id: null }).eq("id", row.id);
+      }
+    }
   }
 
   return NextResponse.json({ connected: true, synced });
