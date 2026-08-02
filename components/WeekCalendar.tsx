@@ -64,7 +64,6 @@ export default function WeekCalendar({
     load();
     onChanged?.();
     emitLessonsChanged();
-    fetch("/api/google/resync", { method: "POST" }).catch(() => {});
   }
 
   async function handleNewSave(fields: any) {
