@@ -6,7 +6,7 @@ import Card from "@/components/Card";
 import { WalletIcon, TrendingUpIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import MonthlyEarningsChart from "@/components/MonthlyEarningsChart";
 import StudentNotesPanel from "@/components/StudentNotesPanel";
-import { getDashboardTotals, materializeDue, ensureRecurringInstances } from "@/lib/data";
+import { getDashboardTotals } from "@/lib/data";
 import { money, monthKey, TR_DAYS, TR_MONTHS } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -20,8 +20,6 @@ export default function DashboardPage() {
   }, []);
 
   const load = useCallback(async () => {
-    await ensureRecurringInstances(sb);
-    await materializeDue(sb);
     const tot = await getDashboardTotals(sb, monthKey());
     setTotals(tot);
   }, [sb]);
