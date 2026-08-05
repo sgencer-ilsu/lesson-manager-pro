@@ -440,12 +440,26 @@ export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: 
 
 export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, newDate: string, newTime: string, scope: RecurringScope) {
   const weekday = (new Date(`${newDate}T00:00:00`).getDay() + 6) % 7;
-  if (ev.lesson_id) {
-    await sb.from("lessons").update({ lesson_date: newDate, lesson_time: newTime }).eq("id", ev.lesson_id);
+  const isFuture = new Date(`${newDate}T${newTime}:00`) > new Date();
+
+  if (ev.lesson_id && isFuture) {
+    // Geçmişte yapılmış ders → gelecekteki bir tarihe taşındı:
+    // lessons kaydını sil, plan'ı "planned" durumuna döndür
+    await sb.from("lessons").delete().eq("id", ev.lesson_id);
+    if (ev.plan_id) {
+      await sb.from("planned")
+        .update({ lesson_date: newDate, lesson_time: newTime, weekday, status: "planned", materialized_lesson_id: null })
+        .eq("id", ev.plan_id);
+    }
+  } else {
+    if (ev.lesson_id) {
+      await sb.from("lessons").update({ lesson_date: newDate, lesson_time: newTime }).eq("id", ev.lesson_id);
+    }
+    if (ev.plan_id) {
+      await sb.from("planned").update({ lesson_date: newDate, lesson_time: newTime, weekday }).eq("id", ev.plan_id);
+    }
   }
-  if (ev.plan_id) {
-    await sb.from("planned").update({ lesson_date: newDate, lesson_time: newTime, weekday }).eq("id", ev.plan_id);
-  }
+
   if (scope === "series") {
     const masterId = ev.parent_plan_id || ev.plan_id;
     if (masterId) {
