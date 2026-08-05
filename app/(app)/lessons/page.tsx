@@ -8,8 +8,8 @@ import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
 import MonthPicker from "@/components/MonthPicker";
 
-function StatChip({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" }) {
-  const valueColor = tone === "emerald" ? "text-emerald-300" : tone === "amber" ? "text-amber-300" : "text-white";
+function StatChip({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" | "red" }) {
+  const valueColor = tone === "emerald" ? "text-emerald-300" : tone === "amber" ? "text-amber-300" : tone === "red" ? "text-red-300" : "text-white";
   return (
     <div className="rounded-xl border border-[#1f2a40] bg-[#101828] px-4 py-2.5 min-w-[110px]">
       <div className="text-[11px] text-muted font-medium">{label}</div>
@@ -65,6 +65,8 @@ export default function LessonsPage() {
   const total = rows.reduce((a, r) => a + (r.fee || 0), 0);
   const done = rows.filter((r) => r.row_type === "lesson").reduce((a, r) => a + (r.fee || 0), 0);
   const planned = rows.filter((r) => r.row_type === "planned").reduce((a, r) => a + (r.fee || 0), 0);
+  const paid = rows.filter((r) => r.row_type === "lesson" && r.paid).reduce((a, r) => a + (r.fee || 0), 0);
+  const unpaid = rows.filter((r) => r.row_type === "lesson" && !r.paid).reduce((a, r) => a + (r.fee || 0), 0);
   const studentName = studentId ? students.find((s) => s.id === studentId)?.name || null : null;
 
   return (
@@ -116,6 +118,8 @@ export default function LessonsPage() {
         <StatChip label="Toplam" value={money(total)} />
         <StatChip label="Yapılan" value={money(done)} tone="emerald" />
         <StatChip label="Planlanan" value={money(planned)} tone="amber" />
+        <StatChip label="Ödendi" value={money(paid)} tone="emerald" />
+        <StatChip label="Ödenmedi" value={money(unpaid)} tone="red" />
         <StatChip label="Ders" value={String(rows.length)} />
       </div>
 
