@@ -427,7 +427,8 @@ export async function planLesson(
       .single();
     if (e2) throw e2;
 
-    await sb.from("lessons").update({ planned_id: plan.id }).eq("id", lesson.id);
+    const { error: e3 } = await sb.from("lessons").update({ planned_id: plan.id }).eq("id", lesson.id);
+    if (e3) throw e3;
   } else {
     const { error } = await sb.from("planned").insert({
       student_id: params.studentId,
@@ -626,37 +627,48 @@ export type MonthlyEarning = { monthKey: string; total: number };
  *  toplam ücreti, yapılmış/yapılmamış fark etmeksizin) döner. Veri olmayan
  *  geçmiş aylar hiç gösterilmez; yeni aylar geldikçe liste otomatik uzar. */
 export async function getMonthlyEarnings(sb: SupabaseClient): Promise<MonthlyEarning[]> {
-  const { data: firstRow } = await sb
-    .from("planned")
-    .select("lesson_date")
-    .order("lesson_date", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
   const today = new Date();
+  const todayISO = toISODate(today);
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const { start: currentMonthStart, end: currentMonthEnd } = monthRange(currentMonthKey);
+
+  // İlk dersin tarihini bul (başlangıç ayı için)
+  const { data: firstLesson } = await sb.from("lessons").select("lesson_date").order("lesson_date", { ascending: true }).limit(1).maybeSingle();
+  const { data: firstPlan } = await sb.from("planned").select("lesson_date").order("lesson_date", { ascending: true }).limit(1).maybeSingle();
+  const firstDate = [firstLesson?.lesson_date, firstPlan?.lesson_date].filter(Boolean).sort()[0];
+
   let startYear = today.getFullYear();
   let startMonth = today.getMonth();
-  if (firstRow?.lesson_date) {
-    const d = new Date(`${firstRow.lesson_date}T00:00:00`);
+  if (firstDate) {
+    const d = new Date(`${firstDate}T00:00:00`);
     startYear = d.getFullYear();
     startMonth = d.getMonth();
   }
 
-  const start = new Date(startYear, startMonth, 1);
-  const startISO = toISODate(start);
+  const startISO = toISODate(new Date(startYear, startMonth, 1));
 
-  const { data, error } = await sb.from("planned").select("lesson_date, fee").gte("lesson_date", startISO);
-  if (error) throw error;
+  // Geçmiş + bu ay yapılan dersler → lessons tablosundan
+  const { data: lessonData, error: e1 } = await sb.from("lessons").select("lesson_date, fee").gte("lesson_date", startISO);
+  // Bu ayın geri kalan planları → planned tablosundan (sadece gelecek + status=planned)
+  const { data: futureData, error: e2 } = await sb
+    .from("planned")
+    .select("lesson_date, fee")
+    .gte("lesson_date", todayISO)
+    .lt("lesson_date", currentMonthEnd)
+    .eq("status", "planned")
+    .is("materialized_lesson_id", null);
+  if (e1) throw e1;
+  if (e2) throw e2;
 
   const totals = new Map<string, number>();
   const cursor = new Date(startYear, startMonth, 1);
-  const end = new Date(today.getFullYear(), today.getMonth(), 1);
-  while (cursor <= end) {
+  const endCursor = new Date(today.getFullYear(), today.getMonth(), 1);
+  while (cursor <= endCursor) {
     const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
     totals.set(key, 0);
     cursor.setMonth(cursor.getMonth() + 1);
   }
-  for (const row of data || []) {
+  for (const row of [...(lessonData || []), ...(futureData || [])]) {
     const key = row.lesson_date.slice(0, 7);
     if (totals.has(key)) totals.set(key, (totals.get(key) || 0) + (row.fee || 0));
   }
