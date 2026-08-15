@@ -317,7 +317,19 @@ export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, we
     });
   }
   events.sort((a, b) => (a.lesson_date + a.lesson_time).localeCompare(b.lesson_date + b.lesson_time));
-  return events;
+
+  // Aynı öğrencinin aynı gün/saatte iki kez görünmesini engelle
+  // (planned + materialized lesson çakışması durumuna karşı)
+  const seen = new Set<string>();
+  const deduped: CalendarEvent[] = [];
+  for (const ev of events) {
+    const key = `${ev.student_id}-${ev.lesson_date}-${ev.lesson_time}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(ev);
+    }
+  }
+  return deduped;
 }
 
 /** Takvimden / dialogdan yeni ders planlama. Geçmiş bir zaman seçilirse direkt yapılan ders olarak kaydedilir. */
