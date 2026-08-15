@@ -93,13 +93,22 @@ export async function POST(request: Request) {
     const student: any = (row as any).students;
     const studentName = student?.name || "Öğrenci";
     const subject = student?.subject || "";
-    const endTime = minutesToTime(timeToMinutes(row.lesson_time) + DURATION_MIN);
+    const endMinutesTotal = timeToMinutes(row.lesson_time) + DURATION_MIN;
+    const endTime = minutesToTime(endMinutesTotal % (24 * 60));
+
+    // Ders gece yarısını geçiyorsa bitiş tarihi ertesi gün olmalı
+    let endDate = row.lesson_date;
+    if (endMinutesTotal >= 24 * 60) {
+      const d = new Date(`${row.lesson_date}T00:00:00`);
+      d.setDate(d.getDate() + 1);
+      endDate = d.toISOString().slice(0, 10);
+    }
 
     const eventBody = {
       summary: subject ? `${studentName} — ${subject}` : studentName,
       description: row.note || "",
       start: { dateTime: `${row.lesson_date}T${row.lesson_time}:00`, timeZone: "Europe/Istanbul" },
-      end: { dateTime: `${row.lesson_date}T${endTime}:00`, timeZone: "Europe/Istanbul" },
+      end: { dateTime: `${endDate}T${endTime}:00`, timeZone: "Europe/Istanbul" },
       extendedProperties: { private: { appSource: APP_TAG, plannedId: String(row.id) } },
     };
 
