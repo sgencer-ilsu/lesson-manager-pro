@@ -86,6 +86,46 @@ export async function setMonthlyFee(sb: SupabaseClient, studentId: number, month
   if (error) throw error;
 }
 
+// ============ TEMİZLİK (veri tutarlılığı) ============
+
+/** Aynı öğrencinin aynı gün/saatinde birden fazla planned satırı varsa fazlalarını siler.
+ *  google_event_id'si olan satır korunur; ikisi de yoksa küçük id'li korunur. */
+export async function deduplicatePlanned(sb: SupabaseClient) {
+  const { data: rows } = await sb
+    .from("planned")
+    .select("id, student_id, lesson_date, lesson_time, google_event_id, materialized_lesson_id")
+    .order("id", { ascending: true });
+
+  if (!rows || rows.length === 0) return;
+
+  // google_event_id'si gerçek olan önce gelir, sonra küçük id
+  const sorted = [...rows].sort((a: any, b: any) => {
+    const aOk = a.google_event_id && a.google_event_id !== "syncing" ? 0 : 1;
+    const bOk = b.google_event_id && b.google_event_id !== "syncing" ? 0 : 1;
+    if (aOk !== bOk) return aOk - bOk;
+    return a.id - b.id;
+  });
+
+  const seen = new Set<string>();
+  const toDelete: any[] = [];
+
+  for (const row of sorted) {
+    const key = `${(row as any).student_id}-${row.lesson_date}-${row.lesson_time}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+    } else {
+      toDelete.push(row);
+    }
+  }
+
+  for (const row of toDelete) {
+    if ((row as any).materialized_lesson_id) {
+      await sb.from("lessons").delete().eq("id", (row as any).materialized_lesson_id);
+    }
+    await sb.from("planned").delete().eq("id", row.id);
+  }
+}
+
 // ============ RECURRING / MATERIALIZATION (kron işleri) ============
 
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
