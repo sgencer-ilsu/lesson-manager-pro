@@ -235,21 +235,26 @@ export async function getDashboardTotals(sb: SupabaseClient, monthText: string) 
   const today = toISODate(new Date());
   const { start, end } = monthRange(monthText);
   const [
-    { data: plannedRows, error: e1 },
-    { data: earnedRows, error: e2 },
+    { data: lessonRows, error: e1 },
+    { data: futurePlanned, error: e2 },
     { data: paidRows, error: e3 },
     { count, error: e4 },
   ] = await Promise.all([
-    sb.from("planned").select("fee").gte("lesson_date", start).lt("lesson_date", end),
-    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).lte("lesson_date", today),
+    // Gerçekleşmiş dersler (lessons tablosu)
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end),
+    // Henüz yapılmamış planlı dersler (planned tablosu, status=planned, materialized yok)
+    sb.from("planned").select("fee").gte("lesson_date", start).lt("lesson_date", end).eq("status", "planned").is("materialized_lesson_id", null),
     sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).eq("paid", true),
     sb.from("planned").select("*", { count: "exact", head: true }).gte("lesson_date", start).lt("lesson_date", end),
   ]);
   if (e1 || e2 || e3 || e4) throw e1 || e2 || e3 || e4;
   const sum = (rows: { fee: number }[] | null) => (rows || []).reduce((a, r) => a + (r.fee || 0), 0);
+  const lessonsTotal = sum(lessonRows as any);
+  const futureTotal = sum(futurePlanned as any);
+  const earnedTotal = sum((lessonRows as any)?.filter((r: any) => r.lesson_date <= today) ?? []);
   return {
-    planned: sum(plannedRows as any),
-    earned: sum(earnedRows as any),
+    planned: lessonsTotal + futureTotal,
+    earned: earnedTotal,
     paid: sum(paidRows as any),
     count: count || 0,
   };
