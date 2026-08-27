@@ -61,7 +61,7 @@ export async function getStudentsForMonth(
   sb: SupabaseClient,
   monthKeyStr: string
 ): Promise<(Student & { monthFee: number })[]> {
-  const students = await getActiveStudents(sb);
+  const students = await getStudents(sb);
   const { data: feeRows, error } = await sb
     .from("student_monthly_fees")
     .select("student_id, month_key, fee")
