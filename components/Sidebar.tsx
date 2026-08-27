@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ensureRecurringInstances, materializeDue, deduplicatePlanned } from "@/lib/data";
+import { ensureRecurringInstances, materializeDue, deduplicatePlanned, revertFutureMaterializations } from "@/lib/data";
 import SidebarAgenda from "./SidebarAgenda";
 
 const NAV = [
@@ -51,6 +51,7 @@ export default function Sidebar() {
     async function run() {
       try {
         await deduplicatePlanned(supabase);
+        await revertFutureMaterializations(supabase);
         await ensureRecurringInstances(supabase);
         await materializeDue(supabase);
         fetch("/api/google/resync", { method: "POST" }).catch(() => {});
