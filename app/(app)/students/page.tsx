@@ -81,13 +81,9 @@ export default function StudentsPage() {
     await updateStudentField(sb, student.id, { active: next });
   }
 
-  // Aktifler önce, pasifler sonda
-  const sorted = [...students].sort((a, b) => {
-    if (a.active === b.active) return a.name.localeCompare(b.name, "tr");
-    return a.active ? -1 : 1;
-  });
-
-  const activeCount = students.filter((s) => s.active).length;
+  const activeStudents = [...students].filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  const inactiveStudents = [...students].filter((s) => !s.active).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  const activeCount = activeStudents.length;
 
   return (
     <div className="max-w-[1100px] space-y-4">
@@ -124,8 +120,8 @@ export default function StudentsPage() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((s, idx) => (
-              <tr key={s.id} className={!s.active ? "opacity-40" : ""}>
+            {activeStudents.map((s, idx) => (
+              <tr key={s.id}>
                 <td className="text-muted text-xs">{idx + 1}</td>
                 <td>
                   <EditableCell value={s.name} onSave={(v) => saveField(s, "name", v)} />
@@ -160,6 +156,39 @@ export default function StudentsPage() {
                     }`}
                   >
                     {s.active ? "Aktif" : "Pasif"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {inactiveStudents.length > 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-2 text-[11px] text-muted tracking-wide border-t border-[#1a2337] bg-[#0c1424]">
+                  PASSİF ÖĞRENCİLER
+                </td>
+              </tr>
+            )}
+            {inactiveStudents.map((s, idx) => (
+              <tr key={s.id} className="opacity-40">
+                <td className="text-muted text-xs">{activeCount + idx + 1}</td>
+                <td><EditableCell value={s.name} onSave={(v) => saveField(s, "name", v)} /></td>
+                <td className="hidden sm:table-cell"><EditableCell value={s.school} onSave={(v) => saveField(s, "school", v)} /></td>
+                <td className="hidden md:table-cell"><EditableCell value={s.subject} onSave={(v) => saveField(s, "subject", v)} /></td>
+                <td>
+                  <EditableCell
+                    key={`${s.id}-${month}-${s.monthFee}`}
+                    value={String(s.monthFee ?? "")}
+                    onSave={(v) => saveMonthFee(s, v)}
+                    suffix=" TL"
+                  />
+                </td>
+                <td className="hidden lg:table-cell"><EditableCell value={s.parent_name} onSave={(v) => saveField(s, "parent_name", v)} /></td>
+                <td className="hidden lg:table-cell"><EditableCell value={s.phone} onSave={(v) => saveField(s, "phone", v)} /></td>
+                <td>
+                  <button
+                    onClick={() => toggleActive(s)}
+                    className="text-xs font-semibold px-2 py-1 rounded-full transition-colors bg-[#1d2c4a] text-[#8b98b3] hover:bg-[#263450]"
+                  >
+                    Pasif
                   </button>
                 </td>
               </tr>
