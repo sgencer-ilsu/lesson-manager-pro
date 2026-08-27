@@ -128,6 +128,29 @@ export async function deduplicatePlanned(sb: SupabaseClient) {
 
 // ============ RECURRING / MATERIALIZATION (kron işleri) ============
 
+/** Gelecekte olan ama yanlışlıkla 'lessons' tablosuna geçmiş dersleri geri alır.
+ *  Eski kod isFuture kontrolü olmadan taşıma yapıyordu; bu fonksiyon o durumu düzeltir. */
+export async function revertFutureMaterializations(sb: SupabaseClient) {
+  const now = new Date();
+  const { data: rows } = await sb
+    .from("lessons")
+    .select("id, lesson_date, lesson_time, planned_id");
+  if (!rows) return;
+
+  for (const row of rows) {
+    const dt = new Date(`${row.lesson_date}T${row.lesson_time}:00`);
+    if (dt <= now) continue; // gerçekten geçmişte → dokunma
+
+    // Gelecekte olan ders lessons tablosunda → geri al
+    if (row.planned_id) {
+      await sb.from("planned")
+        .update({ status: "planned", materialized_lesson_id: null })
+        .eq("id", row.planned_id);
+    }
+    await sb.from("lessons").delete().eq("id", row.id);
+  }
+}
+
 /** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
 export async function materializeDue(sb: SupabaseClient) {
   const now = new Date();
