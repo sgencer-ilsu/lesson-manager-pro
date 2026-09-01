@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getWeekEvents } from "@/lib/data";
 import type { CalendarEvent } from "@/lib/types";
-import { addDays, addMinutesToTime, DURATION_MIN, timeToMinutes, toISODate, TR_DAYS_SHORT, TR_MONTHS_SHORT } from "@/lib/utils";
+import { addDays, addMinutesToTime, DURATION_MIN, monthRange, timeToMinutes, toISODate, TR_DAYS_SHORT, TR_MONTHS_SHORT } from "@/lib/utils";
 import { onLessonsChanged } from "@/lib/events";
 
 type DayGroup = {
@@ -33,9 +33,12 @@ export default function SidebarAgenda() {
   const load = useMemo(() => {
     return async () => {
       const today = new Date();
-      const start = addDays(today, -30);
-      const end = addDays(today, 60);
-      const events = await getWeekEvents(sb, toISODate(start), toISODate(end));
+      // Sadece içinde bulunduğumuz ayın dersleri (bir sonraki ayın dersleri
+      // burada gösterilmez, onlar zaten Dersler/Takvim sayfasında görülebilir).
+      const monthKey = toISODate(today).slice(0, 7);
+      const { start: monthStartISO, end: monthEndExclusiveISO } = monthRange(monthKey);
+      const monthEndISO = toISODate(addDays(new Date(`${monthEndExclusiveISO}T00:00:00`), -1));
+      const events = await getWeekEvents(sb, monthStartISO, monthEndISO);
 
       const byDate = new Map<string, CalendarEvent[]>();
       for (const ev of events) {
