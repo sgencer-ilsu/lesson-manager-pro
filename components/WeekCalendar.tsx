@@ -108,7 +108,7 @@ export default function WeekCalendar({
     refresh();
   }
 
-  function handleScopeChoice(scope: "one" | "series" | null) {
+  function handleScopeChoice(scope: "one" | "future" | null) {
     if (!pending) return;
     if (scope === null) {
       setPending(null);
