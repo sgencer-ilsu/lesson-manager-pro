@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getActiveStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
+import { getStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
 import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
@@ -28,7 +28,10 @@ export default function LessonsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getActiveStudents(sb).then(setStudents);
+    // Pasif öğrenciler de dahil: o ayki ders/ödeme geçmişini görebilmek için
+    // filtre listesinde pasif öğrenciler de yer almalı (sadece takvime ders
+    // eklerken gizleniyorlar, bkz. LessonFormDialog).
+    getStudents(sb).then(setStudents);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -86,6 +89,7 @@ export default function LessonsPage() {
               {students.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
+                  {!s.active ? " (Pasif)" : ""}
                 </option>
               ))}
             </select>
