@@ -3,7 +3,7 @@ export default function RecurringScopeDialog({
   onChoice,
 }: {
   actionText: string;
-  onChoice: (scope: "one" | "series" | null) => void;
+  onChoice: (scope: "one" | "future" | null) => void;
 }) {
   return (
     <div className="modal-backdrop" onClick={() => onChoice(null)}>
@@ -14,8 +14,8 @@ export default function RecurringScopeDialog({
           <button className="btn-primary" onClick={() => onChoice("one")}>
             Sadece bu ders
           </button>
-          <button className="btn-danger" onClick={() => onChoice("series")}>
-            Tüm seri
+          <button className="btn-danger" onClick={() => onChoice("future")}>
+            Bu ve sonraki dersler
           </button>
           <button className="btn" onClick={() => onChoice(null)}>
             Vazgeç
