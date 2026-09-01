@@ -465,10 +465,71 @@ export async function planLesson(
       status: "planned",
     });
     if (error) throw error;
+
+    // Tekrarlı bir ders kaydedildiğinde, sonraki haftaların derslerini arkaplan
+    // işinin (Sidebar, 60sn'de bir) çalışmasını beklemeden HEMEN oluştur.
+    // Aksi halde kullanıcı kaydettikten sonra takvimde ileri haftalara
+    // baktığında dersler henüz üretilmediği için boş görünüyordu.
+    if (params.recurring) {
+      await ensureRecurringInstances(sb);
+    }
   }
 }
 
-export type RecurringScope = "one" | "series";
+export type RecurringScope = "one" | "future";
+
+/** Serinin diğer kayıtlarına değişikliği yayar. Sadece düzenlenen dersin
+ *  tarihinden itibaren (dahil) gelen tekrarları etkiler; ondan ÖNCEKİ
+ *  gelecek dersler eski gün/saatinde kalır. Düzenlenen ders, bu noktadan
+ *  itibaren serinin yeni deseni (yeni gün/saat) haline gelir.
+ */
+async function propagateRecurringChange(
+  sb: SupabaseClient,
+  ev: CalendarEvent,
+  changes: { date: string; time: string; fee?: number; topic?: string; studentId?: number },
+  scope: RecurringScope
+) {
+  if (scope === "one") return;
+  const masterId = ev.parent_plan_id || ev.plan_id;
+  if (!masterId) return;
+
+  const oldWeekday = (new Date(`${ev.lesson_date}T00:00:00`).getDay() + 6) % 7;
+  const newWeekday = (new Date(`${changes.date}T00:00:00`).getDay() + 6) % 7;
+  const dayShift = newWeekday - oldWeekday; // gün farkı, aynı hafta içinde kaydırma
+
+  const extra: Record<string, any> = { lesson_time: changes.time, weekday: newWeekday };
+  if (changes.fee !== undefined) extra.fee = changes.fee;
+  if (changes.topic !== undefined) extra.note = changes.topic;
+  if (changes.studentId !== undefined) extra.student_id = changes.studentId;
+
+  const { data: rows } = await sb
+    .from("planned")
+    .select("id, lesson_date")
+    .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`)
+    .eq("status", "planned")
+    .gte("lesson_date", ev.lesson_date);
+
+  for (const r of rows || []) {
+    if (r.id === ev.plan_id) continue; // bu satır zaten ayrıca güncellendi
+    const shiftedDate = dayShift === 0 ? r.lesson_date : toISODate(addDays(new Date(`${r.lesson_date}T00:00:00`), dayShift));
+    await sb.from("planned").update({ ...extra, lesson_date: shiftedDate, parent_plan_id: ev.plan_id }).eq("id", r.id);
+  }
+
+  const { data: master } = await sb.from("planned").select("recurrence_end").eq("id", masterId).maybeSingle();
+  if (masterId !== ev.plan_id) {
+    // Eski deseni, düzenlenen dersin tarihinden önce durdur; öncesi eski
+    // gününde kalmaya devam eder.
+    const dayBefore = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), -1));
+    await sb.from("planned").update({ recurrence_end: dayBefore }).eq("id", masterId);
+  }
+  // Düzenlenen ders, bu tarihten itibaren serinin yeni deseni olur.
+  await sb.from("planned").update({
+    recurring: true,
+    parent_plan_id: null,
+    weekday: newWeekday,
+    recurrence_end: master?.recurrence_end ?? null,
+  }).eq("id", ev.plan_id);
+}
 
 export async function saveEvent(
   sb: SupabaseClient,
@@ -488,33 +549,43 @@ export async function saveEvent(
       .update({ student_id: updated.studentId, lesson_date: updated.date, lesson_time: updated.time, fee: updated.fee, note: updated.topic })
       .eq("id", ev.plan_id);
   }
-  if (scope === "series") {
-    const masterId = ev.parent_plan_id || ev.plan_id;
-    if (masterId) {
-      await sb
-        .from("planned")
-        .update({ student_id: updated.studentId, lesson_time: updated.time, fee: updated.fee, note: updated.topic })
-        .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`);
-    }
-  }
+  await propagateRecurringChange(
+    sb,
+    ev,
+    { date: updated.date, time: updated.time, fee: updated.fee, topic: updated.topic, studentId: updated.studentId },
+    scope
+  );
 }
 
 export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: RecurringScope) {
-  if (scope === "series") {
-    const masterId = ev.parent_plan_id || ev.plan_id;
-    if (masterId) {
-      const { data: linked } = await sb
-        .from("planned")
-        .select("materialized_lesson_id")
-        .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`);
-      for (const r of linked || []) {
-        if (r.materialized_lesson_id) await sb.from("lessons").delete().eq("id", r.materialized_lesson_id);
-      }
-      await sb.from("planned").delete().or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`);
-    }
-  } else {
+  if (scope === "one") {
     if (ev.lesson_id) await sb.from("lessons").delete().eq("id", ev.lesson_id);
     if (ev.plan_id) await sb.from("planned").delete().eq("id", ev.plan_id);
+    return;
+  }
+
+  // "future": bu ders ve ondan sonraki (henüz yapılmamış olsun olmasın,
+  // bu tarihten itibaren olan) tüm tekrarları sil.
+  const masterId = ev.parent_plan_id || ev.plan_id;
+  if (!masterId) return;
+
+  const { data: linked } = await sb
+    .from("planned")
+    .select("id, materialized_lesson_id, lesson_date")
+    .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`)
+    .gte("lesson_date", ev.lesson_date);
+
+  for (const r of linked || []) {
+    if ((r as any).materialized_lesson_id) await sb.from("lessons").delete().eq("id", (r as any).materialized_lesson_id);
+  }
+  const ids = (linked || []).map((r: any) => r.id);
+  if (ids.length) await sb.from("planned").delete().in("id", ids);
+
+  // Eski deseni bu tarihten önce durdur; öncesindeki (henüz gerçekleşmemiş)
+  // dersler etkilenmesin.
+  if (masterId !== ev.plan_id) {
+    const dayBefore = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), -1));
+    await sb.from("planned").update({ recurrence_end: dayBefore }).eq("id", masterId);
   }
 }
 
@@ -540,12 +611,7 @@ export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, ne
     }
   }
 
-  if (scope === "series") {
-    const masterId = ev.parent_plan_id || ev.plan_id;
-    if (masterId) {
-      await sb.from("planned").update({ lesson_time: newTime }).or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`);
-    }
-  }
+  await propagateRecurringChange(sb, ev, { date: newDate, time: newTime }, scope);
 }
 
 // ============ DERSLER / RAPORLAR listesi ============
