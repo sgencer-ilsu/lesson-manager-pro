@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Student, Planned, Lesson, CalendarEvent, Todo } from "./types";
+import type { Student, Planned, Lesson, CalendarEvent } from "./types";
 import { addDays, addMinutesToTime, DURATION_MIN, monthRange, timeToMinutes, toISODate } from "./utils";
 
 // ============ STUDENTS ============
@@ -866,31 +866,5 @@ export async function getStudentLessonHistory(sb: SupabaseClient, studentId: num
 
 export async function updateLessonNotes(sb: SupabaseClient, lessonId: number, notes: string) {
   const { error } = await sb.from("lessons").update({ notes }).eq("id", lessonId);
-  if (error) throw error;
-}
-
-// ============ YAPILACAKLAR (basit ajanda) ============
-
-/** [startISO, endISO] aralığındaki (her ikisi dahil) tüm yapılacakları döner. */
-export async function getTodos(sb: SupabaseClient, startISO: string, endISO: string): Promise<Todo[]> {
-  const { data, error } = await sb
-    .from("todos")
-    .select("*")
-    .gte("item_date", startISO)
-    .lte("item_date", endISO)
-    .order("item_date", { ascending: true })
-    .order("id", { ascending: true });
-  if (error) throw error;
-  return (data || []) as Todo[];
-}
-
-export async function addTodo(sb: SupabaseClient, itemDate: string, text: string): Promise<Todo> {
-  const { data, error } = await sb.from("todos").insert({ item_date: itemDate, text, done: false }).select().single();
-  if (error) throw error;
-  return data as Todo;
-}
-
-export async function setTodoDone(sb: SupabaseClient, id: number, done: boolean) {
-  const { error } = await sb.from("todos").update({ done }).eq("id", id);
   if (error) throw error;
 }
