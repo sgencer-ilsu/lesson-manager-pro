@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Student, Planned, Lesson, CalendarEvent } from "./types";
+import type { Student, Planned, Lesson, CalendarEvent, Todo } from "./types";
 import { addDays, addMinutesToTime, DURATION_MIN, monthRange, timeToMinutes, toISODate } from "./utils";
 
 // ============ STUDENTS ============
@@ -531,12 +531,81 @@ async function propagateRecurringChange(
   }).eq("id", ev.plan_id);
 }
 
+/** Serinin "çapa" (master) kaydı, TEK BAŞINA (scope="one") başka bir
+ *  tarihe taşınmak/düzenlenmek istendiğinde çağrılır. Master'ın kendi
+ *  satırını doğrudan değiştirmek, serinin gelecekteki otomatik üretim
+ *  desenini de bozardı (bkz. gerçek bug). Bunun yerine:
+ *  1) Yeni tarih/saat için bağımsız, tekrarsız TEK bir kayıt oluşturulur.
+ *  2) Serinin "çapa" görevi, zaten var olan bir sonraki tekrara devredilir
+ *     (ya da yoksa, eski master satırı bir hafta ileri kaydırılır).
+ *  Böylece diğer tüm haftalar eski gün/saatinde değişmeden devam eder.
+ */
+async function detachSingleFromMaster(
+  sb: SupabaseClient,
+  ev: CalendarEvent,
+  changes: { date: string; time: string; fee?: number; topic?: string; studentId?: number }
+) {
+  const masterId = ev.plan_id!;
+
+  await sb.from("planned").insert({
+    student_id: changes.studentId ?? ev.student_id,
+    lesson_date: changes.date,
+    lesson_time: changes.time,
+    fee: changes.fee ?? ev.fee,
+    note: changes.topic ?? ev.topic,
+    recurring: false,
+    weekday: null,
+    recurrence_end: null,
+    status: "planned",
+  });
+
+  const { data: nextChild } = await sb
+    .from("planned")
+    .select("id")
+    .eq("parent_plan_id", masterId)
+    .eq("status", "planned")
+    .gt("lesson_date", ev.lesson_date)
+    .order("lesson_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (nextChild) {
+    const { data: masterRow } = await sb
+      .from("planned")
+      .select("weekday, recurrence_end")
+      .eq("id", masterId)
+      .single();
+    await sb
+      .from("planned")
+      .update({ recurring: true, parent_plan_id: null, weekday: masterRow?.weekday, recurrence_end: masterRow?.recurrence_end })
+      .eq("id", (nextChild as any).id);
+    await sb.from("planned").delete().eq("id", masterId);
+  } else {
+    const nextDate = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), 7));
+    await sb.from("planned").update({ lesson_date: nextDate }).eq("id", masterId);
+  }
+}
+
 export async function saveEvent(
   sb: SupabaseClient,
   ev: CalendarEvent,
   updated: { studentId: number; date: string; time: string; fee: number; topic: string },
   scope: RecurringScope
 ) {
+  // Özel durum: düzenlenen ders serinin ÇAPA (master) kaydıysa ve sadece bu
+  // ders taşınıyorsa, master'ın kendi satırını değiştirmek yerine deseni
+  // koruyacak şekilde devret.
+  if (scope === "one" && ev.recurring && ev.plan_id && !ev.lesson_id) {
+    await detachSingleFromMaster(sb, ev, {
+      date: updated.date,
+      time: updated.time,
+      fee: updated.fee,
+      topic: updated.topic,
+      studentId: updated.studentId,
+    });
+    return;
+  }
+
   if (ev.lesson_id) {
     await sb
       .from("lessons")
@@ -590,6 +659,14 @@ export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: 
 }
 
 export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, newDate: string, newTime: string, scope: RecurringScope) {
+  // Özel durum: taşınan ders serinin ÇAPA (master) kaydıysa ve sadece bu
+  // ders taşınıyorsa, master'ın kendi satırını değiştirmek yerine deseni
+  // koruyacak şekilde devret (bkz. saveEvent'teki aynı mantık).
+  if (scope === "one" && ev.recurring && ev.plan_id && !ev.lesson_id) {
+    await detachSingleFromMaster(sb, ev, { date: newDate, time: newTime });
+    return;
+  }
+
   const weekday = (new Date(`${newDate}T00:00:00`).getDay() + 6) % 7;
   const isFuture = new Date(`${newDate}T${newTime}:00`) > new Date();
 
@@ -789,5 +866,31 @@ export async function getStudentLessonHistory(sb: SupabaseClient, studentId: num
 
 export async function updateLessonNotes(sb: SupabaseClient, lessonId: number, notes: string) {
   const { error } = await sb.from("lessons").update({ notes }).eq("id", lessonId);
+  if (error) throw error;
+}
+
+// ============ YAPILACAKLAR (basit ajanda) ============
+
+/** [startISO, endISO] aralığındaki (her ikisi dahil) tüm yapılacakları döner. */
+export async function getTodos(sb: SupabaseClient, startISO: string, endISO: string): Promise<Todo[]> {
+  const { data, error } = await sb
+    .from("todos")
+    .select("*")
+    .gte("item_date", startISO)
+    .lte("item_date", endISO)
+    .order("item_date", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return (data || []) as Todo[];
+}
+
+export async function addTodo(sb: SupabaseClient, itemDate: string, text: string): Promise<Todo> {
+  const { data, error } = await sb.from("todos").insert({ item_date: itemDate, text, done: false }).select().single();
+  if (error) throw error;
+  return data as Todo;
+}
+
+export async function setTodoDone(sb: SupabaseClient, id: number, done: boolean) {
+  const { error } = await sb.from("todos").update({ done }).eq("id", id);
   if (error) throw error;
 }
