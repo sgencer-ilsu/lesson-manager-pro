@@ -656,8 +656,45 @@ export async function saveEvent(
 
 export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: RecurringScope) {
   if (scope === "one") {
+    if (ev.recurring && ev.plan_id && !ev.lesson_id) {
+      // Bu, serinin ÇAPA (master) kaydı: sadece bunu silmek tüm gelecekteki
+      // deseni de yok ederdi. Görevi var olan bir sonraki tekrara devret,
+      // sonra bu satırı sil (bkz. detachSingleFromMaster'daki aynı mantık).
+      const masterId = ev.plan_id;
+      const { data: nextChild } = await sb
+        .from("planned")
+        .select("id")
+        .eq("parent_plan_id", masterId)
+        .eq("status", "planned")
+        .gt("lesson_date", ev.lesson_date)
+        .order("lesson_date", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (nextChild) {
+        const { data: masterRow } = await sb.from("planned").select("weekday, recurrence_end").eq("id", masterId).single();
+        await sb
+          .from("planned")
+          .update({ recurring: true, parent_plan_id: null, weekday: masterRow?.weekday, recurrence_end: masterRow?.recurrence_end })
+          .eq("id", (nextChild as any).id);
+      }
+      await sb.from("planned").delete().eq("id", masterId);
+      return;
+    }
+
     if (ev.lesson_id) await sb.from("lessons").delete().eq("id", ev.lesson_id);
-    if (ev.plan_id) await sb.from("planned").delete().eq("id", ev.plan_id);
+    if (ev.plan_id) {
+      if (ev.parent_plan_id) {
+        // Serinin sıradan bir tekrarı: tamamen silmek yerine görünmez bir
+        // "iz" (status="skipped") bırak. Yoksa arkaplandaki otomatik üretim
+        // işi bu tarihte artık hiç kayıt kalmadığını sanıp dersi
+        // kendiliğinden GERİ EKLER — sildiğin ders bir süre sonra
+        // "kendiliğinden geri gelmiş" gibi görünür.
+        await sb.from("planned").update({ status: "skipped", fee: 0, note: "", materialized_lesson_id: null }).eq("id", ev.plan_id);
+      } else {
+        // Bağımsız/tek seferlik ders: kimse bu tarihi beklemiyor, güvenle silinebilir.
+        await sb.from("planned").delete().eq("id", ev.plan_id);
+      }
+    }
     return;
   }
 
