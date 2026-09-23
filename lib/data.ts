@@ -328,7 +328,8 @@ export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, we
       .from("planned")
       .select("*, students(name,subject,color,school), lessons!planned_materialized_lesson_fk(topic)")
       .gte("lesson_date", weekStartISO)
-      .lte("lesson_date", weekEndISO),
+      .lte("lesson_date", weekEndISO)
+      .neq("status", "skipped"),
     sb
       .from("lessons")
       .select("*, students(name,subject,color,school)")
@@ -586,6 +587,32 @@ async function detachSingleFromMaster(
   }
 }
 
+/** Serinin sıradan bir tekrarı (master değil), TEK BAŞINA (scope="one")
+ *  başka bir tarihe taşındığında çağrılır. O tarihe ait satırın kendisi
+ *  yeni tarihe taşınır (bu fonksiyon dışında yapılır); ama boşalan ESKİ
+ *  tarihte görünmez bir "iz" (tombstone, status="skipped") bırakılır.
+ *  Bu olmazsa, arkaplandaki otomatik üretim işi (ensureRecurringInstances)
+ *  o tarihte artık hiç kayıt kalmadığını sanıp haftayı YENİDEN oluşturur —
+ *  taşıdığın ders bir süre sonra eski gününe "kendiliğinden geri dönmüş"
+ *  gibi görünür. Bu iz, takvimde/raporlarda hiç görünmez, sadece bu
+ *  yanlış yeniden-oluşturmayı engeller.
+ */
+async function leaveTombstone(sb: SupabaseClient, ev: CalendarEvent, newDate: string) {
+  if (!ev.parent_plan_id || newDate === ev.lesson_date) return;
+  await sb.from("planned").insert({
+    student_id: ev.student_id,
+    lesson_date: ev.lesson_date,
+    lesson_time: ev.lesson_time,
+    fee: 0,
+    note: "",
+    recurring: false,
+    weekday: null,
+    recurrence_end: null,
+    parent_plan_id: ev.parent_plan_id,
+    status: "skipped",
+  });
+}
+
 export async function saveEvent(
   sb: SupabaseClient,
   ev: CalendarEvent,
@@ -617,6 +644,7 @@ export async function saveEvent(
       .from("planned")
       .update({ student_id: updated.studentId, lesson_date: updated.date, lesson_time: updated.time, fee: updated.fee, note: updated.topic })
       .eq("id", ev.plan_id);
+    if (scope === "one") await leaveTombstone(sb, ev, updated.date);
   }
   await propagateRecurringChange(
     sb,
@@ -678,6 +706,7 @@ export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, ne
       await sb.from("planned")
         .update({ lesson_date: newDate, lesson_time: newTime, weekday, status: "planned", materialized_lesson_id: null })
         .eq("id", ev.plan_id);
+      if (scope === "one") await leaveTombstone(sb, ev, newDate);
     }
   } else {
     if (ev.lesson_id) {
@@ -685,6 +714,7 @@ export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, ne
     }
     if (ev.plan_id) {
       await sb.from("planned").update({ lesson_date: newDate, lesson_time: newTime, weekday }).eq("id", ev.plan_id);
+      if (scope === "one") await leaveTombstone(sb, ev, newDate);
     }
   }
 
