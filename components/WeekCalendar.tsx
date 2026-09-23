@@ -11,6 +11,57 @@ import RecurringScopeDialog from "./RecurringScopeDialog";
 
 const DAY_NAMES = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 
+/** Aynı gün, zaman olarak çakışan dersleri yan yana yerleştirmek için
+ *  sütun ataması yapar (Google Takvim benzeri). Çakışma yoksa her ders
+ *  günün tüm genişliğini kaplar; çakışıyorsa aralarında bölüşülür —
+ *  böylece bir ders diğerinin üzerini tamamen kapatmaz.
+ */
+function layoutDayEvents(dayEvents: CalendarEvent[]) {
+  const items = dayEvents
+    .map((ev) => {
+      const start = timeToMinutes(ev.lesson_time);
+      return { ev, start, end: start + DURATION_MIN };
+    })
+    .sort((a, b) => a.start - b.start);
+
+  const results: { ev: CalendarEvent; col: number; cols: number }[] = [];
+  let cluster: typeof items = [];
+  let clusterEnd = -Infinity;
+
+  function flushCluster() {
+    if (cluster.length === 0) return;
+    const columns: { end: number }[] = [];
+    const placed: { item: (typeof items)[number]; col: number }[] = [];
+    for (const it of cluster) {
+      let colIndex = columns.findIndex((c) => c.end <= it.start);
+      if (colIndex === -1) {
+        colIndex = columns.length;
+        columns.push({ end: it.end });
+      } else {
+        columns[colIndex].end = it.end;
+      }
+      placed.push({ item: it, col: colIndex });
+    }
+    const totalCols = columns.length;
+    for (const p of placed) results.push({ ev: p.item.ev, col: p.col, cols: totalCols });
+    cluster = [];
+  }
+
+  for (const it of items) {
+    if (cluster.length === 0 || it.start < clusterEnd) {
+      cluster.push(it);
+      clusterEnd = Math.max(clusterEnd, it.end);
+    } else {
+      flushCluster();
+      cluster = [it];
+      clusterEnd = it.end;
+    }
+  }
+  flushCluster();
+
+  return results;
+}
+
 type DialogState =
   | { kind: "none" }
   | { kind: "new"; date: Date; time: string | null }
@@ -220,12 +271,15 @@ export default function WeekCalendar({
                   <div key={h} className="absolute left-0 right-0 border-t border-[#1c2740]" style={{ top: h * hourPx }} />
                 ))}
 
-                {dayEvents.map((ev) => {
+                {layoutDayEvents(dayEvents).map(({ ev, col, cols }) => {
                   const startMin = timeToMinutes(ev.lesson_time);
                   const top = (startMin / 60) * hourPx;
                   const height = Math.max(24, (DURATION_MIN / 60) * hourPx - 4);
                   const endText = addMinutesToTime(ev.lesson_time, DURATION_MIN);
                   const subjLine = ev.topic ? `${ev.subject} — ${ev.topic}` : ev.subject;
+                  const gap = 2;
+                  const leftPct = (col / cols) * 100;
+                  const widthPct = 100 / cols;
                   return (
                     <div
                       key={`${ev.row_type}-${ev.row_id}`}
@@ -241,13 +295,16 @@ export default function WeekCalendar({
                         e.stopPropagation();
                         setDialog({ kind: "edit", event: ev });
                       }}
-                      className="absolute left-1 right-1 rounded-lg px-2 py-1 cursor-pointer overflow-hidden text-white"
+                      className="absolute rounded-lg px-2 py-1 cursor-pointer overflow-hidden text-white"
                       style={{
                         top,
                         height,
+                        left: `calc(${leftPct}% + ${gap}px)`,
+                        width: `calc(${widthPct}% - ${gap * 2}px)`,
                         background: ev.color,
                         opacity: ev.status === "done" ? 0.95 : 0.85,
                         borderLeft: "3px solid #c4b5fd",
+                        zIndex: col + 1,
                       }}
                       title={`${ev.student_name} • ${ev.lesson_time}–${endText}`}
                     >
@@ -255,7 +312,7 @@ export default function WeekCalendar({
                       <div className="text-[10px] opacity-90 truncate">
                         {ev.lesson_time} – {endText}
                       </div>
-                      {!compact && <div className="text-[10px] opacity-90 truncate">{subjLine}</div>}
+                      {!compact && cols === 1 && <div className="text-[10px] opacity-90 truncate">{subjLine}</div>}
                     </div>
                   );
                 })}
