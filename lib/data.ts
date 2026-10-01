@@ -282,6 +282,81 @@ export async function getDashboardTotals(sb: SupabaseClient, monthText: string) 
   };
 }
 
+export type UnpaidLessonRow = {
+  id: number;
+  lesson_date: string;
+  lesson_time: string;
+  fee: number;
+  student_name: string;
+  color: string;
+};
+
+export type StudentEarningRow = {
+  student_id: number;
+  student_name: string;
+  color: string;
+  total: number;
+  count: number;
+};
+
+/** Bu ay, her öğrenciden (zaten gerçekleşmiş derslerden) toplam ne kadar
+ *  kazanıldığını, en çok kazandırandan en aza doğru sıralı döner.
+ *  Ödenmiş/ödenmemiş ayrımı yapmaz — "hakediş" bazlıdır, "tahsilat" değil. */
+export async function getStudentEarningsRanking(sb: SupabaseClient, monthText: string): Promise<StudentEarningRow[]> {
+  const { start, end } = monthRange(monthText);
+  const { data, error } = await sb
+    .from("lessons")
+    .select("student_id, fee, students(name, color)")
+    .gte("lesson_date", start)
+    .lt("lesson_date", end);
+  if (error) throw error;
+
+  const byStudent = new Map<number, StudentEarningRow>();
+  for (const r of (data || []) as any[]) {
+    const id = r.student_id;
+    const existing = byStudent.get(id);
+    if (existing) {
+      existing.total += r.fee || 0;
+      existing.count += 1;
+    } else {
+      byStudent.set(id, {
+        student_id: id,
+        student_name: r.students?.name || "",
+        color: r.students?.color || "#7c3aed",
+        total: r.fee || 0,
+        count: 1,
+      });
+    }
+  }
+
+  return Array.from(byStudent.values()).sort((a, b) => b.total - a.total);
+}
+
+/** Bu ayki, ödenmemiş (paid=false) ve zaten gerçekleşmiş dersleri döner,
+ *  en eski tarihten en yeniye sıralı. Dashboard'da hızlı tahsilat takibi için. */
+export async function getUnpaidLessons(sb: SupabaseClient, monthText: string): Promise<{ rows: UnpaidLessonRow[]; total: number }> {
+  const { start, end } = monthRange(monthText);
+  const { data, error } = await sb
+    .from("lessons")
+    .select("id, lesson_date, lesson_time, fee, students(name, color)")
+    .gte("lesson_date", start)
+    .lt("lesson_date", end)
+    .eq("paid", false)
+    .order("lesson_date", { ascending: true })
+    .order("lesson_time", { ascending: true });
+  if (error) throw error;
+  const rows: UnpaidLessonRow[] = (data || []).map((r: any) => ({
+    id: r.id,
+    lesson_date: r.lesson_date,
+    lesson_time: r.lesson_time,
+    fee: r.fee || 0,
+    student_name: r.students?.name || "",
+    color: r.students?.color || "#7c3aed",
+  }));
+  const total = rows.reduce((a, r) => a + r.fee, 0);
+  return { rows, total };
+}
+
 export type TodayRow = {
   kind: "done" | "planned";
   lesson_date: string;
