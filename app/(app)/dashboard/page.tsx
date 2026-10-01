@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import Card from "@/components/Card";
 import { WalletIcon, TrendingUpIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import MonthlyEarningsChart from "@/components/MonthlyEarningsChart";
-import StudentNotesPanel from "@/components/StudentNotesPanel";
+import UnpaidLessonsPanel from "@/components/UnpaidLessonsPanel";
+import StudentEarningsRankingPanel from "@/components/StudentEarningsRankingPanel";
 import { getDashboardTotals } from "@/lib/data";
 import { money, monthKey, TR_DAYS, TR_MONTHS } from "@/lib/utils";
 
@@ -51,7 +52,10 @@ export default function DashboardPage() {
 
       <MonthlyEarningsChart />
 
-      <StudentNotesPanel />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <UnpaidLessonsPanel />
+        <StudentEarningsRankingPanel />
+      </div>
     </div>
   );
 }
