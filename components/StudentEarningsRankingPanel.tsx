@@ -31,13 +31,13 @@ export default function StudentEarningsRankingPanel() {
     <div className="card p-5">
       <div className="mb-4">
         <h2 className="text-base font-bold text-white">Öğrenci Kazanç Sıralaması</h2>
-        <p className="text-xs text-muted mt-0.5">{monthLabel} · en çok kazandırandan en aza</p>
+        <p className="text-xs text-muted mt-0.5">{monthLabel} · bu ay planlanan tüm derslere göre, en çok kazandırandan en aza</p>
       </div>
 
       {loading ? (
         <p className="text-sm text-muted">Yükleniyor…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-muted">Bu ay henüz gerçekleşmiş ders yok.</p>
+        <p className="text-sm text-muted">Bu ay için planlanmış ders yok.</p>
       ) : (
         <div className="flex flex-col gap-2 max-h-[320px] overflow-y-auto pr-1">
           {rows.map((r, i) => {
