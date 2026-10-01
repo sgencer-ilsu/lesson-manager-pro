@@ -26,12 +26,19 @@ export default function StudentEarningsRankingPanel() {
   const now = new Date();
   const monthLabel = `${TR_MONTHS[now.getMonth()]} ${now.getFullYear()}`;
   const maxTotal = rows.length ? rows[0].total : 0;
+  const grandTotal = rows.reduce((a, r) => a + r.total, 0);
 
   return (
     <div className="card p-5">
-      <div className="mb-4">
-        <h2 className="text-base font-bold text-white">Öğrenci Kazanç Sıralaması</h2>
-        <p className="text-xs text-muted mt-0.5">{monthLabel} · bu ay planlanan tüm derslere göre, en çok kazandırandan en aza</p>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-base font-bold text-white">Öğrenci Kazanç Sıralaması</h2>
+          <p className="text-xs text-muted mt-0.5">{monthLabel} · bu ay planlanan tüm derslere göre, en çok kazandırandan en aza</p>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] text-muted">Toplam</div>
+          <div className="text-lg font-bold text-emerald-300">{money(grandTotal)}</div>
+        </div>
       </div>
 
       {loading ? (
