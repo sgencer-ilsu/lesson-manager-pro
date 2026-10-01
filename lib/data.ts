@@ -291,6 +291,16 @@ export type UnpaidLessonRow = {
   color: string;
 };
 
+export type UnpaidStudentRow = {
+  student_id: number;
+  student_name: string;
+  color: string;
+  total: number;
+  count: number;
+  lessonIds: number[];
+  oldestDate: string;
+};
+
 export type StudentEarningRow = {
   student_id: number;
   student_name: string;
@@ -341,31 +351,58 @@ export async function getStudentEarningsRanking(sb: SupabaseClient, monthText: s
   return Array.from(byStudent.values()).sort((a, b) => b.total - a.total);
 }
 
-/** Önceki aylardan kalan, hâlâ ödenmemiş (paid=false) dersleri döner,
- *  en eski tarihten en yeniye sıralı. Bu ayın (henüz ay sonu gelmemiş)
- *  dersleri burada GÖSTERİLMEZ — çünkü ödeme zaten ay sonunda toplu
- *  alınıyor; sadece geçmiş aylardan kalan tahsilat takibi içindir. */
-export async function getUnpaidLessons(sb: SupabaseClient): Promise<{ rows: UnpaidLessonRow[]; total: number }> {
+/** Önceki aylardan kalan, hâlâ ödenmemiş (paid=false) dersleri ÖĞRENCİ
+ *  bazında gruplanmış olarak döner: her öğrenci için toplam borç, ders
+ *  sayısı ve o öğrencinin tüm ödenmemiş ders id'leri (toplu "ödendi"
+ *  işaretlemesi için). En eski borcu olan öğrenci en üstte.
+ *  Bu ayın (henüz ay sonu gelmemiş) dersleri burada GÖSTERİLMEZ —
+ *  çünkü ödeme zaten ay sonunda toplu alınıyor; sadece geçmiş aylardan
+ *  kalan tahsilat takibi içindir. */
+export async function getUnpaidLessons(sb: SupabaseClient): Promise<{ rows: UnpaidStudentRow[]; total: number }> {
   const currentMonthKey = monthKey();
   const { start: currentMonthStart } = monthRange(currentMonthKey);
   const { data, error } = await sb
     .from("lessons")
-    .select("id, lesson_date, lesson_time, fee, students(name, color)")
+    .select("id, student_id, lesson_date, lesson_time, fee, students(name, color)")
     .lt("lesson_date", currentMonthStart)
     .eq("paid", false)
     .order("lesson_date", { ascending: true })
     .order("lesson_time", { ascending: true });
   if (error) throw error;
-  const rows: UnpaidLessonRow[] = (data || []).map((r: any) => ({
-    id: r.id,
-    lesson_date: r.lesson_date,
-    lesson_time: r.lesson_time,
-    fee: r.fee || 0,
-    student_name: r.students?.name || "",
-    color: r.students?.color || "#7c3aed",
-  }));
-  const total = rows.reduce((a, r) => a + r.fee, 0);
+
+  const byStudent = new Map<number, UnpaidStudentRow>();
+  for (const r of (data || []) as any[]) {
+    const id = r.student_id;
+    const existing = byStudent.get(id);
+    if (existing) {
+      existing.total += r.fee || 0;
+      existing.count += 1;
+      existing.lessonIds.push(r.id);
+      if (r.lesson_date < existing.oldestDate) existing.oldestDate = r.lesson_date;
+    } else {
+      byStudent.set(id, {
+        student_id: id,
+        student_name: r.students?.name || "",
+        color: r.students?.color || "#7c3aed",
+        total: r.fee || 0,
+        count: 1,
+        lessonIds: [r.id],
+        oldestDate: r.lesson_date,
+      });
+    }
+  }
+
+  const rows = Array.from(byStudent.values()).sort((a, b) => a.oldestDate.localeCompare(b.oldestDate));
+  const total = rows.reduce((a, r) => a + r.total, 0);
   return { rows, total };
+}
+
+/** Birden fazla ders kaydını tek seferde ödendi/ödenmedi olarak işaretler.
+ *  Bir öğrencinin geçmişten kalan TÜM borcunu tek tıkla kapatmak için. */
+export async function updateLessonsPaid(sb: SupabaseClient, lessonIds: number[], paid: boolean) {
+  if (lessonIds.length === 0) return;
+  const { error } = await sb.from("lessons").update({ paid }).in("id", lessonIds);
+  if (error) throw error;
 }
 
 export type TodayRow = {
