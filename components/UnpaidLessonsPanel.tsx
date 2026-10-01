@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getUnpaidLessons, updateLessonPaid, type UnpaidLessonRow } from "@/lib/data";
-import { money, monthKey, TR_MONTHS } from "@/lib/utils";
+import { money, TR_MONTHS } from "@/lib/utils";
 
 export default function UnpaidLessonsPanel() {
   const sb = useMemo(() => createClient(), []);
@@ -12,7 +12,7 @@ export default function UnpaidLessonsPanel() {
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    const { rows: r, total: t } = await getUnpaidLessons(sb, monthKey());
+    const { rows: r, total: t } = await getUnpaidLessons(sb);
     setRows(r);
     setTotal(t);
     setLoading(false);
@@ -31,15 +31,12 @@ export default function UnpaidLessonsPanel() {
     await updateLessonPaid(sb, row.id, true);
   }
 
-  const now = new Date();
-  const monthLabel = `${TR_MONTHS[now.getMonth()]} ${now.getFullYear()}`;
-
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-base font-bold text-white">Ödenmemiş Dersler</h2>
-          <p className="text-xs text-muted mt-0.5">{monthLabel} · ödeme bekleyen gerçekleşmiş dersler</p>
+          <h2 className="text-base font-bold text-white">Geçmişten Kalan Ödenmemiş Dersler</h2>
+          <p className="text-xs text-muted mt-0.5">önceki aylardan, hâlâ tahsil edilmemiş dersler</p>
         </div>
         <div className="text-right">
           <div className="text-[11px] text-muted">Toplam</div>
@@ -50,12 +47,12 @@ export default function UnpaidLessonsPanel() {
       {loading ? (
         <p className="text-sm text-muted">Yükleniyor…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-muted">Bu ay ödenmemiş ders yok 🎉</p>
+        <p className="text-sm text-muted">Geçmişten kalan ödenmemiş ders yok 🎉</p>
       ) : (
         <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto pr-1">
           {rows.map((r) => {
             const d = new Date(`${r.lesson_date}T00:00:00`);
-            const dateLabel = `${d.getDate()} ${TR_MONTHS[d.getMonth()].slice(0, 3)}`;
+            const dateLabel = `${d.getDate()} ${TR_MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
             return (
               <div key={r.id} className="flex items-center gap-3 rounded-lg border border-[#1f2a40] bg-[#101828] px-3 py-2">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: r.color }} />
