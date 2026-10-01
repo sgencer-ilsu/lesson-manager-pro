@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Student, Planned, Lesson, CalendarEvent } from "./types";
-import { addDays, addMinutesToTime, DURATION_MIN, monthRange, timeToMinutes, toISODate } from "./utils";
+import { addDays, addMinutesToTime, DURATION_MIN, monthKey, monthRange, timeToMinutes, toISODate } from "./utils";
 
 // ============ STUDENTS ============
 
@@ -299,20 +299,29 @@ export type StudentEarningRow = {
   count: number;
 };
 
-/** Bu ay, her öğrenciden (zaten gerçekleşmiş derslerden) toplam ne kadar
- *  kazanıldığını, en çok kazandırandan en aza doğru sıralı döner.
- *  Ödenmiş/ödenmemiş ayrımı yapmaz — "hakediş" bazlıdır, "tahsilat" değil. */
+/** Bu ay, her öğrenciden PLANLANAN tüm derslerden (zaten yapılmış +
+ *  henüz yapılmamış planlı) toplam ne kadar gelir bekleniyorsa onu,
+ *  en çok kazandırandan en aza doğru sıralı döner. "Hakediş" değil,
+ *  "bu ay için planlanan toplam gelir" bazlıdır. */
 export async function getStudentEarningsRanking(sb: SupabaseClient, monthText: string): Promise<StudentEarningRow[]> {
   const { start, end } = monthRange(monthText);
-  const { data, error } = await sb
-    .from("lessons")
-    .select("student_id, fee, students(name, color)")
-    .gte("lesson_date", start)
-    .lt("lesson_date", end);
-  if (error) throw error;
+  const [{ data: doneRows, error: e1 }, { data: plannedRows, error: e2 }] = await Promise.all([
+    // Zaten gerçekleşmiş dersler
+    sb.from("lessons").select("student_id, fee, students(name, color)").gte("lesson_date", start).lt("lesson_date", end),
+    // Henüz yapılmamış, hâlâ planlı dersler (materialized olmamış)
+    sb
+      .from("planned")
+      .select("student_id, fee, students(name, color)")
+      .gte("lesson_date", start)
+      .lt("lesson_date", end)
+      .eq("status", "planned")
+      .is("materialized_lesson_id", null),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
 
   const byStudent = new Map<number, StudentEarningRow>();
-  for (const r of (data || []) as any[]) {
+  for (const r of [...((doneRows || []) as any[]), ...((plannedRows || []) as any[])]) {
     const id = r.student_id;
     const existing = byStudent.get(id);
     if (existing) {
@@ -332,15 +341,17 @@ export async function getStudentEarningsRanking(sb: SupabaseClient, monthText: s
   return Array.from(byStudent.values()).sort((a, b) => b.total - a.total);
 }
 
-/** Bu ayki, ödenmemiş (paid=false) ve zaten gerçekleşmiş dersleri döner,
- *  en eski tarihten en yeniye sıralı. Dashboard'da hızlı tahsilat takibi için. */
-export async function getUnpaidLessons(sb: SupabaseClient, monthText: string): Promise<{ rows: UnpaidLessonRow[]; total: number }> {
-  const { start, end } = monthRange(monthText);
+/** Önceki aylardan kalan, hâlâ ödenmemiş (paid=false) dersleri döner,
+ *  en eski tarihten en yeniye sıralı. Bu ayın (henüz ay sonu gelmemiş)
+ *  dersleri burada GÖSTERİLMEZ — çünkü ödeme zaten ay sonunda toplu
+ *  alınıyor; sadece geçmiş aylardan kalan tahsilat takibi içindir. */
+export async function getUnpaidLessons(sb: SupabaseClient): Promise<{ rows: UnpaidLessonRow[]; total: number }> {
+  const currentMonthKey = monthKey();
+  const { start: currentMonthStart } = monthRange(currentMonthKey);
   const { data, error } = await sb
     .from("lessons")
     .select("id, lesson_date, lesson_time, fee, students(name, color)")
-    .gte("lesson_date", start)
-    .lt("lesson_date", end)
+    .lt("lesson_date", currentMonthStart)
     .eq("paid", false)
     .order("lesson_date", { ascending: true })
     .order("lesson_time", { ascending: true });
