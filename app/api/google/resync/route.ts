@@ -49,7 +49,13 @@ export async function POST(request: Request) {
     .from("planned")
     .select("id, lesson_date, lesson_time, note, google_event_id, students(name, subject)")
     .gte("lesson_date", startISO)
-    .lte("lesson_date", endISO);
+    .lte("lesson_date", endISO)
+    // "skipped" (status) satırlar görünmez bir "iz" kaydıdır (bir dersin
+    // boşalan eski tarihinde, tekrar otomatik oluşturulmasını engellemek
+    // için bırakılır) — gerçek bir ders değildir, Google Takvim'e asla
+    // senkronize edilmemeli. Bu filtre olmadan, taşınan bir ders Google'da
+    // hem eski hem yeni tarihte görünüyordu.
+    .neq("status", "skipped");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
