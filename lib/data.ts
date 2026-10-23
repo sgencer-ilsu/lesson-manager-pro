@@ -186,7 +186,7 @@ export async function materializeDue(sb: SupabaseClient) {
           duration_min: DURATION_MIN,
           topic: "",
           fee,
-          paid: false,
+          paid: r.paid || false, // peşin ödenmişse bu bilgi gerçekleşen derse de taşınır
           notes: r.note || "",
           planned_id: r.id,
         })
@@ -896,16 +896,20 @@ export type LessonRow = {
   subject: string;
 };
 
+/** "Durum" (yapıldı/planlandı) ile "Ödeme" (ödendi/ödenmedi) birbirinden
+ *  bağımsızdır: bir ders henüz yapılmamış olsa bile veli peşin ödemiş
+ *  olabilir, bu yüzden planned satırları da artık kendi paid alanını taşır. */
 export async function getLessonRows(
   sb: SupabaseClient,
   monthText: string,
   studentId: number | null,
-  paidFilter: "Tümü" | "Ödendi" | "Ödenmedi" | "Planlandı"
+  statusFilter: "Tümü" | "Yapıldı" | "Planlandı",
+  paidFilter: "Tümü" | "Ödendi" | "Ödenmedi"
 ): Promise<LessonRow[]> {
   const rows: LessonRow[] = [];
   const { start, end } = monthRange(monthText);
 
-  if (paidFilter !== "Planlandı") {
+  if (statusFilter !== "Planlandı") {
     let q = sb
       .from("lessons")
       .select("id,lesson_date,lesson_time,topic,fee,paid,students(name,school,subject)")
@@ -922,20 +926,22 @@ export async function getLessonRows(
     }
   }
 
-  if (paidFilter === "Tümü" || paidFilter === "Planlandı") {
+  if (statusFilter !== "Yapıldı") {
     let q = sb
       .from("planned")
-      .select("id,lesson_date,lesson_time,fee,note,students(name,school,subject)")
+      .select("id,lesson_date,lesson_time,fee,note,paid,students(name,school,subject)")
       .gte("lesson_date", start)
       .lt("lesson_date", end)
       .is("materialized_lesson_id", null)
       .eq("status", "planned");
     if (studentId) q = q.eq("student_id", studentId);
+    if (paidFilter === "Ödendi") q = q.eq("paid", true);
+    if (paidFilter === "Ödenmedi") q = q.eq("paid", false);
     const { data, error } = await q;
     if (error) throw error;
     for (const r of data || []) {
       const s: any = (r as any).students;
-      rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: (r as any).note || "", fee: r.fee, paid: false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
+      rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: (r as any).note || "", fee: r.fee, paid: (r as any).paid || false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
     }
   }
 
@@ -955,6 +961,13 @@ export async function updatePlannedTopic(sb: SupabaseClient, plannedId: number, 
 
 export async function updateLessonPaid(sb: SupabaseClient, lessonId: number, paid: boolean) {
   await sb.from("lessons").update({ paid }).eq("id", lessonId);
+}
+
+/** Henüz yapılmamış (planlı) bir dersin peşin ödenip ödenmediğini işaretler.
+ *  Ders zamanı gelip 'lessons' tablosuna aktarıldığında (materializeDue)
+ *  bu peşin ödeme bilgisi yeni kayda aynen taşınır. */
+export async function updatePlannedPaid(sb: SupabaseClient, plannedId: number, paid: boolean) {
+  await sb.from("planned").update({ paid }).eq("id", plannedId);
 }
 
 export async function quickAddLesson(

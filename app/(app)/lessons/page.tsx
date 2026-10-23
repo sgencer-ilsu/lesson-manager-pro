@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, type LessonRow } from "@/lib/data";
+import { getStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, updatePlannedPaid, type LessonRow } from "@/lib/data";
 import { exportCSV, exportPDF } from "@/lib/export";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
@@ -23,7 +23,8 @@ export default function LessonsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [month, setMonth] = useState(monthKey());
   const [studentId, setStudentId] = useState<number | null>(null);
-  const [paidFilter, setPaidFilter] = useState<"Tümü" | "Ödendi" | "Ödenmedi" | "Planlandı">("Tümü");
+  const [statusFilter, setStatusFilter] = useState<"Tümü" | "Yapıldı" | "Planlandı">("Tümü");
+  const [paidFilter, setPaidFilter] = useState<"Tümü" | "Ödendi" | "Ödenmedi">("Tümü");
   const [rows, setRows] = useState<LessonRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +39,7 @@ export default function LessonsPage() {
   async function filter() {
     setLoading(true);
     try {
-      setRows(await getLessonRows(sb, month, studentId, paidFilter));
+      setRows(await getLessonRows(sb, month, studentId, statusFilter, paidFilter));
     } finally {
       setLoading(false);
     }
@@ -47,7 +48,7 @@ export default function LessonsPage() {
   useEffect(() => {
     filter();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month, studentId, paidFilter]);
+  }, [month, studentId, statusFilter, paidFilter]);
 
   async function toggleTopic(row: LessonRow, newTopic: string) {
     if (row.row_type === "lesson") {
@@ -58,18 +59,24 @@ export default function LessonsPage() {
     setRows((rs) => rs.map((r) => (r === row ? { ...r, topic: newTopic } : r)));
   }
 
+  // Durum (yapıldı/planlandı) ile ödeme birbirinden bağımsızdır: henüz
+  // yapılmamış bir ders de peşin ödenmiş olabilir, bu yüzden ödeme butonu
+  // hem "lesson" hem "planned" satırlarında çalışır.
   async function togglePaid(row: LessonRow) {
-    if (row.row_type !== "lesson") return;
     const next = !row.paid;
-    await updateLessonPaid(sb, row.row_id, next);
+    if (row.row_type === "lesson") {
+      await updateLessonPaid(sb, row.row_id, next);
+    } else {
+      await updatePlannedPaid(sb, row.row_id, next);
+    }
     setRows((rs) => rs.map((r) => (r === row ? { ...r, paid: next } : r)));
   }
 
   const total = rows.reduce((a, r) => a + (r.fee || 0), 0);
   const done = rows.filter((r) => r.row_type === "lesson").reduce((a, r) => a + (r.fee || 0), 0);
   const planned = rows.filter((r) => r.row_type === "planned").reduce((a, r) => a + (r.fee || 0), 0);
-  const paid = rows.filter((r) => r.row_type === "lesson" && r.paid).reduce((a, r) => a + (r.fee || 0), 0);
-  const unpaid = rows.filter((r) => r.row_type === "lesson" && !r.paid).reduce((a, r) => a + (r.fee || 0), 0);
+  const paid = rows.filter((r) => r.paid).reduce((a, r) => a + (r.fee || 0), 0);
+  const unpaid = rows.filter((r) => !r.paid).reduce((a, r) => a + (r.fee || 0), 0);
   const studentName = studentId ? students.find((s) => s.id === studentId)?.name || null : null;
 
   return (
@@ -95,12 +102,19 @@ export default function LessonsPage() {
             </select>
           </div>
           <div>
+            <label className="block text-xs text-muted mb-1.5">Durum</label>
+            <select className="input w-[130px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+              <option>Tümü</option>
+              <option>Yapıldı</option>
+              <option>Planlandı</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-xs text-muted mb-1.5">Ödeme</label>
-            <select className="input w-[140px]" value={paidFilter} onChange={(e) => setPaidFilter(e.target.value as any)}>
+            <select className="input w-[130px]" value={paidFilter} onChange={(e) => setPaidFilter(e.target.value as any)}>
               <option>Tümü</option>
               <option>Ödendi</option>
               <option>Ödenmedi</option>
-              <option>Planlandı</option>
             </select>
           </div>
 
@@ -139,6 +153,7 @@ export default function LessonsPage() {
               <th>Konu</th>
               <th>Tutar</th>
               <th>Durum</th>
+              <th>Ödeme</th>
             </tr>
           </thead>
           <tbody>
@@ -160,17 +175,22 @@ export default function LessonsPage() {
                 </td>
                 <td>{money(r.fee)}</td>
                 <td>
-                  {r.row_type === "planned" ? (
-                    "Planlandı"
-                  ) : (
-                    <button
-                      onClick={() => togglePaid(r)}
-                      className={`text-xs font-semibold px-2 py-1 rounded-full ${r.paid ? "bg-emerald-900/40 text-emerald-300" : "bg-amber-900/40 text-amber-300"}`}
-                      title="Ödeme durumunu değiştirmek için tıkla"
-                    >
-                      {r.paid ? "Ödendi" : "Ödenmedi"}
-                    </button>
-                  )}
+                  <span
+                    className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                      r.row_type === "lesson" ? "bg-blue-900/40 text-blue-300" : "bg-[#1f2a40] text-muted"
+                    }`}
+                  >
+                    {r.row_type === "lesson" ? "Yapıldı" : "Planlandı"}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    onClick={() => togglePaid(r)}
+                    className={`text-xs font-semibold px-2 py-1 rounded-full ${r.paid ? "bg-emerald-900/40 text-emerald-300" : "bg-amber-900/40 text-amber-300"}`}
+                    title="Ödeme durumunu değiştirmek için tıkla"
+                  >
+                    {r.paid ? "Ödendi" : "Ödenmedi"}
+                  </button>
                 </td>
               </tr>
             ))}

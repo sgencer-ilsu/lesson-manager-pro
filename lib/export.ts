@@ -6,14 +6,20 @@ const TUTOR_TITLE = "Math-Stat Öğretmeni";
 const TUTOR_PHONE = "0 505 811 93 27";
 
 function statusText(r: LessonRow) {
-  return r.row_type === "planned" ? "Planlandı" : r.paid ? "Ödendi" : "Ödenmedi";
+  return r.row_type === "planned" ? "Planlandı" : "Yapıldı";
+}
+function paidText(r: LessonRow) {
+  return r.paid ? "Ödendi" : "Ödenmedi";
 }
 
+// Not: bu CSV, öğretmenin kendi defteri içindir ve Durum/Ödeme ayrı
+// sütunlardır (ekrandaki tabloyla birebir). Veliye gidecek PDF raporunda
+// (exportPDF) bu sütunlar eskisi gibi hiç YER ALMAZ — bkz. aşağısı.
 export function exportCSV(rows: LessonRow[], filename = "ders_raporu.csv") {
-  const header = ["Tarih", "Saat", "Öğrenci", "Okul", "Ders", "Konu", "Tutar", "Durum"];
+  const header = ["Tarih", "Saat", "Öğrenci", "Okul", "Ders", "Konu", "Tutar", "Durum", "Ödeme"];
   const lines = [header.join(";")];
   for (const r of rows) {
-    const vals = [r.lesson_date, r.lesson_time, r.name, r.school, r.subject, r.topic, money(r.fee), statusText(r)];
+    const vals = [r.lesson_date, r.lesson_time, r.name, r.school, r.subject, r.topic, money(r.fee), statusText(r), paidText(r)];
     lines.push(vals.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";"));
   }
   const csv = "\uFEFF" + lines.join("\r\n");

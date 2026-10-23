@@ -34,7 +34,8 @@ create table if not exists planned (
   recurrence_end date,
   parent_plan_id bigint references planned(id) on delete cascade,
   materialized_lesson_id bigint,
-  status text default 'planned' -- 'planned' | 'done'
+  status text default 'planned', -- 'planned' | 'done'
+  paid boolean not null default false -- ders henüz yapılmadan peşin ödendiyse true
 );
 
 -- ============ LESSONS (yapılan / kayıtlı dersler) ============

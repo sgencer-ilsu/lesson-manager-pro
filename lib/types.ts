@@ -28,6 +28,7 @@ export type Planned = {
   parent_plan_id: number | null;
   materialized_lesson_id: number | null;
   status: "planned" | "done";
+  paid: boolean;
 };
 
 export type Lesson = {
