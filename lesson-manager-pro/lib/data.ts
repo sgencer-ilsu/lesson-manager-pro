@@ -1,0 +1,1073 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Student, Planned, Lesson, CalendarEvent } from "./types";
+import { addDays, addMinutesToTime, DURATION_MIN, monthKey, monthRange, timeToMinutes, toISODate } from "./utils";
+
+// ============ STUDENTS ============
+
+export async function getStudents(sb: SupabaseClient): Promise<Student[]> {
+  const { data, error } = await sb.from("students").select("*").order("active", { ascending: false }).order("name");
+  if (error) throw error;
+  return data as Student[];
+}
+
+export async function getActiveStudents(sb: SupabaseClient): Promise<Student[]> {
+  const { data, error } = await sb.from("students").select("*").eq("active", true).order("name");
+  if (error) throw error;
+  return data as Student[];
+}
+
+export async function addStudent(
+  sb: SupabaseClient,
+  fields: Omit<Partial<Student>, "id" | "user_id" | "created_at">
+) {
+  const { count } = await sb.from("students").select("*", { count: "exact", head: true });
+  const COLORS = ["#7c3aed", "#2563eb", "#059669", "#ea580c", "#dc2626", "#0891b2", "#a21caf", "#ca8a04"];
+  const color = COLORS[(count || 0) % COLORS.length];
+  const { error } = await sb.from("students").insert({ ...fields, color, active: fields.active ?? true });
+  if (error) throw error;
+}
+
+export async function updateStudentField(
+  sb: SupabaseClient,
+  studentId: number,
+  fields: Partial<Pick<Student, "name" | "school" | "subject" | "fee" | "parent_name" | "phone" | "email" | "active">>
+) {
+  const { error } = await sb.from("students").update(fields).eq("id", studentId);
+  if (error) throw error;
+}
+
+// ============ AYLIK ÜCRETLER (öncelikli fiyatlandırma) ============
+
+/** Bir öğrencinin belirli bir ay için geçerli ücretini bulur: o aya veya
+ *  öncesine ait en yakın kayıtlı özel ücreti kullanır ("önceki aydakiler
+ *  aynen devam eder"); hiç özel kayıt yoksa öğrencinin temel ücretine döner. */
+export async function getEffectiveFee(sb: SupabaseClient, studentId: number, monthKeyStr: string): Promise<number> {
+  const { data, error } = await sb
+    .from("student_monthly_fees")
+    .select("fee")
+    .eq("student_id", studentId)
+    .lte("month_key", monthKeyStr)
+    .order("month_key", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data.fee;
+  const { data: student } = await sb.from("students").select("fee").eq("id", studentId).maybeSingle();
+  return student?.fee || 0;
+}
+
+/** Aktif öğrencileri, seçilen ay için geçerli ücretleriyle birlikte döner. */
+export async function getStudentsForMonth(
+  sb: SupabaseClient,
+  monthKeyStr: string
+): Promise<(Student & { monthFee: number })[]> {
+  const students = await getStudents(sb);
+  const { data: feeRows, error } = await sb
+    .from("student_monthly_fees")
+    .select("student_id, month_key, fee")
+    .lte("month_key", monthKeyStr)
+    .order("month_key", { ascending: false });
+  if (error) throw error;
+
+  const latestByStudent = new Map<number, number>();
+  for (const row of feeRows || []) {
+    if (!latestByStudent.has(row.student_id)) latestByStudent.set(row.student_id, row.fee);
+  }
+
+  return students.map((s) => ({ ...s, monthFee: latestByStudent.get(s.id) ?? s.fee }));
+}
+
+/** Bir öğrencinin belirli bir ay için ücretini kaydeder (yoksa oluşturur).
+ *  O aydan itibaren, yeni bir ay için ayrıca değiştirilene kadar geçerli olur. */
+export async function setMonthlyFee(sb: SupabaseClient, studentId: number, monthKeyStr: string, fee: number) {
+  const { error } = await sb
+    .from("student_monthly_fees")
+    .upsert({ student_id: studentId, month_key: monthKeyStr, fee }, { onConflict: "student_id,month_key" });
+  if (error) throw error;
+}
+
+// ============ TEMİZLİK (veri tutarlılığı) ============
+
+/** Aynı öğrencinin aynı gün/saatinde birden fazla planned satırı varsa fazlalarını siler.
+ *  google_event_id'si olan satır korunur; ikisi de yoksa küçük id'li korunur. */
+export async function deduplicatePlanned(sb: SupabaseClient) {
+  const { data: rows } = await sb
+    .from("planned")
+    .select("id, student_id, lesson_date, lesson_time, google_event_id, materialized_lesson_id")
+    .order("id", { ascending: true });
+
+  if (!rows || rows.length === 0) return;
+
+  // google_event_id'si gerçek olan önce gelir, sonra küçük id
+  const sorted = [...rows].sort((a: any, b: any) => {
+    const aOk = a.google_event_id && a.google_event_id !== "syncing" ? 0 : 1;
+    const bOk = b.google_event_id && b.google_event_id !== "syncing" ? 0 : 1;
+    if (aOk !== bOk) return aOk - bOk;
+    return a.id - b.id;
+  });
+
+  const seen = new Set<string>();
+  const toDelete: any[] = [];
+
+  for (const row of sorted) {
+    const key = `${(row as any).student_id}-${row.lesson_date}-${row.lesson_time}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+    } else {
+      toDelete.push(row);
+    }
+  }
+
+  for (const row of toDelete) {
+    if ((row as any).materialized_lesson_id) {
+      await sb.from("lessons").delete().eq("id", (row as any).materialized_lesson_id);
+    }
+    await sb.from("planned").delete().eq("id", row.id);
+  }
+}
+
+// ============ RECURRING / MATERIALIZATION (kron işleri) ============
+
+/** Gelecekte olan ama yanlışlıkla 'lessons' tablosuna geçmiş dersleri geri alır.
+ *  Eski kod isFuture kontrolü olmadan taşıma yapıyordu; bu fonksiyon o durumu düzeltir. */
+export async function revertFutureMaterializations(sb: SupabaseClient) {
+  const now = new Date();
+  const { data: rows } = await sb
+    .from("lessons")
+    .select("id, lesson_date, lesson_time, planned_id");
+  if (!rows) return;
+
+  for (const row of rows) {
+    const dt = new Date(`${row.lesson_date}T${row.lesson_time}:00`);
+    if (dt <= now) continue; // gerçekten geçmişte → dokunma
+
+    // Gelecekte olan ders lessons tablosunda → geri al
+    if (row.planned_id) {
+      await sb.from("planned")
+        .update({ status: "planned", materialized_lesson_id: null })
+        .eq("id", row.planned_id);
+    }
+    await sb.from("lessons").delete().eq("id", row.id);
+  }
+}
+
+/** Zamanı geçmiş planlı dersleri 'lessons' tablosuna aktarır (yapıldı olarak işaretler). */
+export async function materializeDue(sb: SupabaseClient) {
+  const now = new Date();
+  const { data: rows, error } = await sb
+    .from("planned")
+    .select("*, students(fee)")
+    .eq("status", "planned")
+    .is("materialized_lesson_id", null);
+  if (error) throw error;
+
+  for (const r of rows || []) {
+    const dt = new Date(`${r.lesson_date}T${r.lesson_time}:00`);
+    if (dt <= now) {
+      // Bu satırı "ele geçirmeyi" dene: sadece hâlâ 'planned' durumundaysa
+      // 'materializing' yap. Başka bir sekme/istemci aynı anda aynı işlemi
+      // yapmaya çalışıyorsa, bu güncelleme onda 0 satır etkiler ve o taraf
+      // atlar — böylece aynı ders iki kez oluşturulamaz.
+      const { data: claimed } = await sb
+        .from("planned")
+        .update({ status: "materializing" })
+        .eq("id", r.id)
+        .eq("status", "planned")
+        .select("id");
+      if (!claimed || claimed.length === 0) continue;
+
+      const fee = r.fee || (r as any).students?.fee || 0;
+      const { data: inserted, error: insErr } = await sb
+        .from("lessons")
+        .insert({
+          student_id: r.student_id,
+          lesson_date: r.lesson_date,
+          lesson_time: r.lesson_time,
+          duration_min: DURATION_MIN,
+          topic: "",
+          fee,
+          paid: r.paid || false, // peşin ödenmişse bu bilgi gerçekleşen derse de taşınır
+          notes: r.note || "",
+          planned_id: r.id,
+        })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      await sb.from("planned").update({ materialized_lesson_id: inserted.id, status: "done" }).eq("id", r.id);
+    }
+  }
+}
+
+/** Tekrarlayan (haftalık) planların ileriki/geçmiş 90 günlük tekil kayıtlarını oluşturur.
+ *  Her yeni kayıt, kendi tarihinin ait olduğu ayın geçerli (aylık) ücretini kullanır. */
+export async function ensureRecurringInstances(sb: SupabaseClient, untilDays = 90) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = addDays(today, -30);
+  const end = addDays(today, untilDays);
+
+  const { data: masters, error } = await sb
+    .from("planned")
+    .select("*")
+    .eq("recurring", true)
+    .is("parent_plan_id", null);
+  if (error) throw error;
+
+  for (const m of masters || []) {
+    const masterDate = new Date(`${m.lesson_date}T00:00:00`);
+    const weekday = m.weekday ?? (masterDate.getDay() + 6) % 7;
+    const recEnd = m.recurrence_end ? new Date(`${m.recurrence_end}T00:00:00`) : end;
+    let d = start > masterDate ? start : masterDate;
+    while (((d.getDay() + 6) % 7) !== weekday) d = addDays(d, 1);
+    const finalEnd = recEnd < end ? recEnd : end;
+    while (d <= finalEnd) {
+      const dISO = toISODate(d);
+      if (dISO !== m.lesson_date) {
+        const { data: exists } = await sb
+          .from("planned")
+          .select("id")
+          .eq("parent_plan_id", m.id)
+          .eq("lesson_date", dISO)
+          .maybeSingle();
+        if (!exists) {
+          const instanceFee = await getEffectiveFee(sb, m.student_id, dISO.slice(0, 7));
+          // Eş zamanlı çağrılarda aynı satırın iki kez eklenmesini önlemek için
+          // çakışma olunca yoksay (onConflict do nothing)
+          await sb.from("planned").insert({
+            student_id: m.student_id,
+            lesson_date: dISO,
+            lesson_time: m.lesson_time,
+            fee: instanceFee,
+            note: m.note,
+            recurring: false,
+            weekday,
+            recurrence_end: m.recurrence_end,
+            parent_plan_id: m.id,
+            status: "planned",
+          }).select().maybeSingle();
+        }
+      }
+      d = addDays(d, 7);
+    }
+  }
+}
+
+// ============ DASHBOARD ============
+
+export async function getDashboardTotals(sb: SupabaseClient, monthText: string) {
+  const today = toISODate(new Date());
+  const { start, end } = monthRange(monthText);
+  const [
+    { data: lessonRows, error: e1 },
+    { data: futurePlanned, error: e2 },
+    { data: paidRows, error: e3 },
+    { data: earnedRows, error: e4 },
+  ] = await Promise.all([
+    // Tüm gerçekleşmiş dersler (lessons tablosu)
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end),
+    // Henüz yapılmamış planlı dersler (planned tablosu, status=planned, materialized yok)
+    sb.from("planned").select("fee").gte("lesson_date", start).lt("lesson_date", end).eq("status", "planned").is("materialized_lesson_id", null),
+    // Ödenen dersler
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).eq("paid", true),
+    // Bugüne kadar yapılan dersler
+    sb.from("lessons").select("fee").gte("lesson_date", start).lt("lesson_date", end).lte("lesson_date", today),
+  ]);
+  if (e1 || e2 || e3 || e4) throw e1 || e2 || e3 || e4;
+  const sum = (rows: { fee: number }[] | null) => (rows || []).reduce((a, r) => a + (r.fee || 0), 0);
+  return {
+    planned: sum(lessonRows as any) + sum(futurePlanned as any),
+    earned: sum(earnedRows as any),
+    paid: sum(paidRows as any),
+    count: (lessonRows?.length || 0) + (futurePlanned?.length || 0),
+  };
+}
+
+export type UnpaidLessonRow = {
+  id: number;
+  lesson_date: string;
+  lesson_time: string;
+  fee: number;
+  student_name: string;
+  color: string;
+};
+
+export type UnpaidStudentRow = {
+  student_id: number;
+  student_name: string;
+  color: string;
+  total: number;
+  count: number;
+  lessonIds: number[];
+  oldestDate: string;
+};
+
+export type StudentEarningRow = {
+  student_id: number;
+  student_name: string;
+  color: string;
+  total: number;
+  count: number;
+};
+
+/** Bu ay, her öğrenciden PLANLANAN tüm derslerden (zaten yapılmış +
+ *  henüz yapılmamış planlı) toplam ne kadar gelir bekleniyorsa onu,
+ *  en çok kazandırandan en aza doğru sıralı döner. "Hakediş" değil,
+ *  "bu ay için planlanan toplam gelir" bazlıdır. */
+export async function getStudentEarningsRanking(sb: SupabaseClient, monthText: string): Promise<StudentEarningRow[]> {
+  const { start, end } = monthRange(monthText);
+  const [{ data: doneRows, error: e1 }, { data: plannedRows, error: e2 }] = await Promise.all([
+    // Zaten gerçekleşmiş dersler
+    sb.from("lessons").select("student_id, fee, students(name, color)").gte("lesson_date", start).lt("lesson_date", end),
+    // Henüz yapılmamış, hâlâ planlı dersler (materialized olmamış)
+    sb
+      .from("planned")
+      .select("student_id, fee, students(name, color)")
+      .gte("lesson_date", start)
+      .lt("lesson_date", end)
+      .eq("status", "planned")
+      .is("materialized_lesson_id", null),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+
+  const byStudent = new Map<number, StudentEarningRow>();
+  for (const r of [...((doneRows || []) as any[]), ...((plannedRows || []) as any[])]) {
+    const id = r.student_id;
+    const existing = byStudent.get(id);
+    if (existing) {
+      existing.total += r.fee || 0;
+      existing.count += 1;
+    } else {
+      byStudent.set(id, {
+        student_id: id,
+        student_name: r.students?.name || "",
+        color: r.students?.color || "#7c3aed",
+        total: r.fee || 0,
+        count: 1,
+      });
+    }
+  }
+
+  return Array.from(byStudent.values()).sort((a, b) => b.total - a.total);
+}
+
+/** Önceki aylardan kalan, hâlâ ödenmemiş (paid=false) dersleri ÖĞRENCİ
+ *  bazında gruplanmış olarak döner: her öğrenci için toplam borç, ders
+ *  sayısı ve o öğrencinin tüm ödenmemiş ders id'leri (toplu "ödendi"
+ *  işaretlemesi için). En eski borcu olan öğrenci en üstte.
+ *  Bu ayın (henüz ay sonu gelmemiş) dersleri burada GÖSTERİLMEZ —
+ *  çünkü ödeme zaten ay sonunda toplu alınıyor; sadece geçmiş aylardan
+ *  kalan tahsilat takibi içindir. */
+export async function getUnpaidLessons(sb: SupabaseClient): Promise<{ rows: UnpaidStudentRow[]; total: number }> {
+  const currentMonthKey = monthKey();
+  const { start: currentMonthStart } = monthRange(currentMonthKey);
+  const { data, error } = await sb
+    .from("lessons")
+    .select("id, student_id, lesson_date, lesson_time, fee, students(name, color)")
+    .lt("lesson_date", currentMonthStart)
+    .eq("paid", false)
+    .order("lesson_date", { ascending: true })
+    .order("lesson_time", { ascending: true });
+  if (error) throw error;
+
+  const byStudent = new Map<number, UnpaidStudentRow>();
+  for (const r of (data || []) as any[]) {
+    const id = r.student_id;
+    const existing = byStudent.get(id);
+    if (existing) {
+      existing.total += r.fee || 0;
+      existing.count += 1;
+      existing.lessonIds.push(r.id);
+      if (r.lesson_date < existing.oldestDate) existing.oldestDate = r.lesson_date;
+    } else {
+      byStudent.set(id, {
+        student_id: id,
+        student_name: r.students?.name || "",
+        color: r.students?.color || "#7c3aed",
+        total: r.fee || 0,
+        count: 1,
+        lessonIds: [r.id],
+        oldestDate: r.lesson_date,
+      });
+    }
+  }
+
+  const rows = Array.from(byStudent.values()).sort((a, b) => a.oldestDate.localeCompare(b.oldestDate));
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  return { rows, total };
+}
+
+/** Birden fazla ders kaydını tek seferde ödendi/ödenmedi olarak işaretler.
+ *  Bir öğrencinin geçmişten kalan TÜM borcunu tek tıkla kapatmak için. */
+export async function updateLessonsPaid(sb: SupabaseClient, lessonIds: number[], paid: boolean) {
+  if (lessonIds.length === 0) return;
+  const { error } = await sb.from("lessons").update({ paid }).in("id", lessonIds);
+  if (error) throw error;
+}
+
+export type TodayRow = {
+  kind: "done" | "planned";
+  lesson_date: string;
+  lesson_time: string;
+  topic: string;
+  fee: number;
+  name: string;
+  subject: string;
+  color: string;
+};
+
+export async function getTodayPanel(sb: SupabaseClient): Promise<TodayRow[]> {
+  const today = toISODate(new Date());
+  const [{ data: done, error: e1 }, { data: planned, error: e2 }] = await Promise.all([
+    sb.from("lessons").select("lesson_date,lesson_time,topic,fee,students(name,subject,color)").eq("lesson_date", today),
+    sb
+      .from("planned")
+      .select("lesson_date,lesson_time,note,fee,students(name,subject,color)")
+      .eq("lesson_date", today)
+      .eq("status", "planned")
+      .is("materialized_lesson_id", null),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+
+  const rows: TodayRow[] = [];
+  for (const r of done || []) {
+    const s: any = (r as any).students;
+    rows.push({ kind: "done", lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: r.topic || "", fee: r.fee, name: s?.name || "", subject: s?.subject || "", color: s?.color || "#2563eb" });
+  }
+  for (const r of planned || []) {
+    const s: any = (r as any).students;
+    rows.push({ kind: "planned", lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: (r as any).note || "", fee: r.fee, name: s?.name || "", subject: s?.subject || "", color: s?.color || "#2563eb" });
+  }
+  rows.sort((a, b) => a.lesson_time.localeCompare(b.lesson_time));
+  return rows;
+}
+
+// ============ CALENDAR (haftalık görünüm) ============
+
+export async function getWeekEvents(sb: SupabaseClient, weekStartISO: string, weekEndISO: string): Promise<CalendarEvent[]> {
+  const [{ data: plannedRows, error: e1 }, { data: lessonRows, error: e2 }] = await Promise.all([
+    sb
+      .from("planned")
+      .select("*, students(name,subject,color,school), lessons!planned_materialized_lesson_fk(topic)")
+      .gte("lesson_date", weekStartISO)
+      .lte("lesson_date", weekEndISO)
+      .neq("status", "skipped"),
+    sb
+      .from("lessons")
+      .select("*, students(name,subject,color,school)")
+      .gte("lesson_date", weekStartISO)
+      .lte("lesson_date", weekEndISO)
+      .is("planned_id", null),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+
+  const events: CalendarEvent[] = [];
+  for (const p of plannedRows || []) {
+    const s: any = (p as any).students;
+    const materializedTopic = (p as any).lessons?.topic;
+    events.push({
+      row_type: "planned",
+      row_id: p.id,
+      plan_id: p.id,
+      lesson_id: p.materialized_lesson_id,
+      student_id: p.student_id,
+      lesson_date: p.lesson_date,
+      lesson_time: p.lesson_time,
+      fee: p.fee,
+      topic: materializedTopic || p.note || "",
+      status: p.status,
+      recurring: p.recurring,
+      parent_plan_id: p.parent_plan_id,
+      student_name: s?.name || "",
+      subject: s?.subject || "",
+      school: s?.school || "",
+      color: s?.color || "#7c3aed",
+    });
+  }
+  for (const l of lessonRows || []) {
+    const s: any = (l as any).students;
+    events.push({
+      row_type: "lesson",
+      row_id: l.id,
+      plan_id: null,
+      lesson_id: l.id,
+      student_id: l.student_id,
+      lesson_date: l.lesson_date,
+      lesson_time: l.lesson_time,
+      fee: l.fee,
+      topic: l.topic || "",
+      status: "done",
+      recurring: false,
+      parent_plan_id: null,
+      student_name: s?.name || "",
+      subject: s?.subject || "",
+      school: s?.school || "",
+      color: s?.color || "#7c3aed",
+    });
+  }
+  events.sort((a, b) => (a.lesson_date + a.lesson_time).localeCompare(b.lesson_date + b.lesson_time));
+
+  // Aynı öğrencinin aynı gün/saatte iki kez görünmesini engelle
+  // (planned + materialized lesson çakışması durumuna karşı)
+  const seen = new Set<string>();
+  const deduped: CalendarEvent[] = [];
+  for (const ev of events) {
+    const key = `${ev.student_id}-${ev.lesson_date}-${ev.lesson_time}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(ev);
+    }
+  }
+  return deduped;
+}
+
+/** Takvimden / dialogdan yeni ders planlama. Geçmiş bir zaman seçilirse direkt yapılan ders olarak kaydedilir. */
+export async function planLesson(
+  sb: SupabaseClient,
+  params: {
+    studentId: number;
+    date: string;
+    time: string;
+    fee: number;
+    note: string;
+    recurring: boolean;
+    recurrenceEnd: string | null;
+  }
+) {
+  const selectedDt = new Date(`${params.date}T${params.time}:00`);
+  const weekday = (new Date(`${params.date}T00:00:00`).getDay() + 6) % 7;
+
+  if (selectedDt <= new Date() && !params.recurring) {
+    const { data: lesson, error: e1 } = await sb
+      .from("lessons")
+      .insert({
+        student_id: params.studentId,
+        lesson_date: params.date,
+        lesson_time: params.time,
+        duration_min: DURATION_MIN,
+        topic: params.note,
+        fee: params.fee,
+        paid: false,
+        notes: "",
+      })
+      .select()
+      .single();
+    if (e1) throw e1;
+
+    const { data: plan, error: e2 } = await sb
+      .from("planned")
+      .insert({
+        student_id: params.studentId,
+        lesson_date: params.date,
+        lesson_time: params.time,
+        fee: params.fee,
+        note: params.note,
+        recurring: false,
+        weekday,
+        recurrence_end: null,
+        materialized_lesson_id: lesson.id,
+        status: "done",
+      })
+      .select()
+      .single();
+    if (e2) throw e2;
+
+    const { error: e3 } = await sb.from("lessons").update({ planned_id: plan.id }).eq("id", lesson.id);
+    if (e3) throw e3;
+  } else {
+    const { error } = await sb.from("planned").insert({
+      student_id: params.studentId,
+      lesson_date: params.date,
+      lesson_time: params.time,
+      fee: params.fee,
+      note: params.note,
+      recurring: params.recurring,
+      weekday,
+      recurrence_end: params.recurring ? params.recurrenceEnd : null,
+      status: "planned",
+    });
+    if (error) throw error;
+
+    // Tekrarlı bir ders kaydedildiğinde, sonraki haftaların derslerini arkaplan
+    // işinin (Sidebar, 60sn'de bir) çalışmasını beklemeden HEMEN oluştur.
+    // Aksi halde kullanıcı kaydettikten sonra takvimde ileri haftalara
+    // baktığında dersler henüz üretilmediği için boş görünüyordu.
+    if (params.recurring) {
+      await ensureRecurringInstances(sb);
+    }
+  }
+}
+
+export type RecurringScope = "one" | "future";
+
+/** Serinin diğer kayıtlarına değişikliği yayar. Sadece düzenlenen dersin
+ *  tarihinden itibaren (dahil) gelen tekrarları etkiler; ondan ÖNCEKİ
+ *  gelecek dersler eski gün/saatinde kalır. Düzenlenen ders, bu noktadan
+ *  itibaren serinin yeni deseni (yeni gün/saat) haline gelir.
+ */
+async function propagateRecurringChange(
+  sb: SupabaseClient,
+  ev: CalendarEvent,
+  changes: { date: string; time: string; fee?: number; topic?: string; studentId?: number },
+  scope: RecurringScope
+) {
+  if (scope === "one") return;
+  const masterId = ev.parent_plan_id || ev.plan_id;
+  if (!masterId) return;
+
+  const oldWeekday = (new Date(`${ev.lesson_date}T00:00:00`).getDay() + 6) % 7;
+  const newWeekday = (new Date(`${changes.date}T00:00:00`).getDay() + 6) % 7;
+  const dayShift = newWeekday - oldWeekday; // gün farkı, aynı hafta içinde kaydırma
+
+  const extra: Record<string, any> = { lesson_time: changes.time, weekday: newWeekday };
+  if (changes.fee !== undefined) extra.fee = changes.fee;
+  if (changes.topic !== undefined) extra.note = changes.topic;
+  if (changes.studentId !== undefined) extra.student_id = changes.studentId;
+
+  const { data: rows } = await sb
+    .from("planned")
+    .select("id, lesson_date")
+    .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`)
+    .eq("status", "planned")
+    .gte("lesson_date", ev.lesson_date);
+
+  for (const r of rows || []) {
+    if (r.id === ev.plan_id) continue; // bu satır zaten ayrıca güncellendi
+    const shiftedDate = dayShift === 0 ? r.lesson_date : toISODate(addDays(new Date(`${r.lesson_date}T00:00:00`), dayShift));
+    await sb.from("planned").update({ ...extra, lesson_date: shiftedDate, parent_plan_id: ev.plan_id }).eq("id", r.id);
+  }
+
+  const { data: master } = await sb.from("planned").select("recurrence_end").eq("id", masterId).maybeSingle();
+  if (masterId !== ev.plan_id) {
+    // Eski deseni, düzenlenen dersin tarihinden önce durdur; öncesi eski
+    // gününde kalmaya devam eder.
+    const dayBefore = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), -1));
+    await sb.from("planned").update({ recurrence_end: dayBefore }).eq("id", masterId);
+  }
+  // Düzenlenen ders, bu tarihten itibaren serinin yeni deseni olur.
+  await sb.from("planned").update({
+    recurring: true,
+    parent_plan_id: null,
+    weekday: newWeekday,
+    recurrence_end: master?.recurrence_end ?? null,
+  }).eq("id", ev.plan_id);
+}
+
+/** Serinin "çapa" (master) kaydı, TEK BAŞINA (scope="one") başka bir
+ *  tarihe taşınmak/düzenlenmek istendiğinde çağrılır. Master'ın kendi
+ *  satırını doğrudan değiştirmek, serinin gelecekteki otomatik üretim
+ *  desenini de bozardı (bkz. gerçek bug). Bunun yerine:
+ *  1) Yeni tarih/saat için bağımsız, tekrarsız TEK bir kayıt oluşturulur.
+ *  2) Serinin "çapa" görevi, zaten var olan bir sonraki tekrara devredilir
+ *     (ya da yoksa, eski master satırı bir hafta ileri kaydırılır).
+ *  Böylece diğer tüm haftalar eski gün/saatinde değişmeden devam eder.
+ */
+async function detachSingleFromMaster(
+  sb: SupabaseClient,
+  ev: CalendarEvent,
+  changes: { date: string; time: string; fee?: number; topic?: string; studentId?: number }
+) {
+  const masterId = ev.plan_id!;
+
+  await sb.from("planned").insert({
+    student_id: changes.studentId ?? ev.student_id,
+    lesson_date: changes.date,
+    lesson_time: changes.time,
+    fee: changes.fee ?? ev.fee,
+    note: changes.topic ?? ev.topic,
+    recurring: false,
+    weekday: null,
+    recurrence_end: null,
+    status: "planned",
+  });
+
+  const { data: nextChild } = await sb
+    .from("planned")
+    .select("id")
+    .eq("parent_plan_id", masterId)
+    .eq("status", "planned")
+    .gt("lesson_date", ev.lesson_date)
+    .order("lesson_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (nextChild) {
+    const { data: masterRow } = await sb
+      .from("planned")
+      .select("weekday, recurrence_end")
+      .eq("id", masterId)
+      .single();
+    await sb
+      .from("planned")
+      .update({ recurring: true, parent_plan_id: null, weekday: masterRow?.weekday, recurrence_end: masterRow?.recurrence_end })
+      .eq("id", (nextChild as any).id);
+    await sb.from("planned").delete().eq("id", masterId);
+  } else {
+    const nextDate = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), 7));
+    await sb.from("planned").update({ lesson_date: nextDate }).eq("id", masterId);
+  }
+}
+
+/** Serinin sıradan bir tekrarı (master değil), TEK BAŞINA (scope="one")
+ *  başka bir tarihe taşındığında çağrılır. O tarihe ait satırın kendisi
+ *  yeni tarihe taşınır (bu fonksiyon dışında yapılır); ama boşalan ESKİ
+ *  tarihte görünmez bir "iz" (tombstone, status="skipped") bırakılır.
+ *  Bu olmazsa, arkaplandaki otomatik üretim işi (ensureRecurringInstances)
+ *  o tarihte artık hiç kayıt kalmadığını sanıp haftayı YENİDEN oluşturur —
+ *  taşıdığın ders bir süre sonra eski gününe "kendiliğinden geri dönmüş"
+ *  gibi görünür. Bu iz, takvimde/raporlarda hiç görünmez, sadece bu
+ *  yanlış yeniden-oluşturmayı engeller.
+ */
+async function leaveTombstone(sb: SupabaseClient, ev: CalendarEvent, newDate: string) {
+  if (!ev.parent_plan_id || newDate === ev.lesson_date) return;
+  await sb.from("planned").insert({
+    student_id: ev.student_id,
+    lesson_date: ev.lesson_date,
+    lesson_time: ev.lesson_time,
+    fee: 0,
+    note: "",
+    recurring: false,
+    weekday: null,
+    recurrence_end: null,
+    parent_plan_id: ev.parent_plan_id,
+    status: "skipped",
+  });
+}
+
+export async function saveEvent(
+  sb: SupabaseClient,
+  ev: CalendarEvent,
+  updated: { studentId: number; date: string; time: string; fee: number; topic: string },
+  scope: RecurringScope
+) {
+  // Özel durum: düzenlenen ders serinin ÇAPA (master) kaydıysa ve sadece bu
+  // ders taşınıyorsa, master'ın kendi satırını değiştirmek yerine deseni
+  // koruyacak şekilde devret.
+  if (scope === "one" && ev.recurring && ev.plan_id && !ev.lesson_id) {
+    await detachSingleFromMaster(sb, ev, {
+      date: updated.date,
+      time: updated.time,
+      fee: updated.fee,
+      topic: updated.topic,
+      studentId: updated.studentId,
+    });
+    return;
+  }
+
+  if (ev.lesson_id) {
+    await sb
+      .from("lessons")
+      .update({ student_id: updated.studentId, lesson_date: updated.date, lesson_time: updated.time, topic: updated.topic, fee: updated.fee })
+      .eq("id", ev.lesson_id);
+  }
+  if (ev.plan_id) {
+    await sb
+      .from("planned")
+      .update({ student_id: updated.studentId, lesson_date: updated.date, lesson_time: updated.time, fee: updated.fee, note: updated.topic })
+      .eq("id", ev.plan_id);
+    if (scope === "one") await leaveTombstone(sb, ev, updated.date);
+  }
+  await propagateRecurringChange(
+    sb,
+    ev,
+    { date: updated.date, time: updated.time, fee: updated.fee, topic: updated.topic, studentId: updated.studentId },
+    scope
+  );
+}
+
+export async function deleteEvent(sb: SupabaseClient, ev: CalendarEvent, scope: RecurringScope) {
+  if (scope === "one") {
+    if (ev.recurring && ev.plan_id && !ev.lesson_id) {
+      // Bu, serinin ÇAPA (master) kaydı: sadece bunu silmek tüm gelecekteki
+      // deseni de yok ederdi. Görevi var olan bir sonraki tekrara devret,
+      // sonra bu satırı sil (bkz. detachSingleFromMaster'daki aynı mantık).
+      const masterId = ev.plan_id;
+      const { data: nextChild } = await sb
+        .from("planned")
+        .select("id")
+        .eq("parent_plan_id", masterId)
+        .eq("status", "planned")
+        .gt("lesson_date", ev.lesson_date)
+        .order("lesson_date", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (nextChild) {
+        const { data: masterRow } = await sb.from("planned").select("weekday, recurrence_end").eq("id", masterId).single();
+        await sb
+          .from("planned")
+          .update({ recurring: true, parent_plan_id: null, weekday: masterRow?.weekday, recurrence_end: masterRow?.recurrence_end })
+          .eq("id", (nextChild as any).id);
+      }
+      await sb.from("planned").delete().eq("id", masterId);
+      return;
+    }
+
+    if (ev.lesson_id) await sb.from("lessons").delete().eq("id", ev.lesson_id);
+    if (ev.plan_id) {
+      if (ev.parent_plan_id) {
+        // Serinin sıradan bir tekrarı: tamamen silmek yerine görünmez bir
+        // "iz" (status="skipped") bırak. Yoksa arkaplandaki otomatik üretim
+        // işi bu tarihte artık hiç kayıt kalmadığını sanıp dersi
+        // kendiliğinden GERİ EKLER — sildiğin ders bir süre sonra
+        // "kendiliğinden geri gelmiş" gibi görünür.
+        await sb.from("planned").update({ status: "skipped", fee: 0, note: "", materialized_lesson_id: null }).eq("id", ev.plan_id);
+      } else {
+        // Bağımsız/tek seferlik ders: kimse bu tarihi beklemiyor, güvenle silinebilir.
+        await sb.from("planned").delete().eq("id", ev.plan_id);
+      }
+    }
+    return;
+  }
+
+  // "future": bu ders ve ondan sonraki (henüz yapılmamış olsun olmasın,
+  // bu tarihten itibaren olan) tüm tekrarları sil.
+  const masterId = ev.parent_plan_id || ev.plan_id;
+  if (!masterId) return;
+
+  const { data: linked } = await sb
+    .from("planned")
+    .select("id, materialized_lesson_id, lesson_date")
+    .or(`id.eq.${masterId},parent_plan_id.eq.${masterId}`)
+    .gte("lesson_date", ev.lesson_date);
+
+  for (const r of linked || []) {
+    if ((r as any).materialized_lesson_id) await sb.from("lessons").delete().eq("id", (r as any).materialized_lesson_id);
+  }
+  const ids = (linked || []).map((r: any) => r.id);
+  if (ids.length) await sb.from("planned").delete().in("id", ids);
+
+  // Eski deseni bu tarihten önce durdur; öncesindeki (henüz gerçekleşmemiş)
+  // dersler etkilenmesin.
+  if (masterId !== ev.plan_id) {
+    const dayBefore = toISODate(addDays(new Date(`${ev.lesson_date}T00:00:00`), -1));
+    await sb.from("planned").update({ recurrence_end: dayBefore }).eq("id", masterId);
+  }
+}
+
+export async function moveCalendarItem(sb: SupabaseClient, ev: CalendarEvent, newDate: string, newTime: string, scope: RecurringScope) {
+  // Özel durum: taşınan ders serinin ÇAPA (master) kaydıysa ve sadece bu
+  // ders taşınıyorsa, master'ın kendi satırını değiştirmek yerine deseni
+  // koruyacak şekilde devret (bkz. saveEvent'teki aynı mantık).
+  if (scope === "one" && ev.recurring && ev.plan_id && !ev.lesson_id) {
+    await detachSingleFromMaster(sb, ev, { date: newDate, time: newTime });
+    return;
+  }
+
+  const weekday = (new Date(`${newDate}T00:00:00`).getDay() + 6) % 7;
+  const isFuture = new Date(`${newDate}T${newTime}:00`) > new Date();
+
+  if (ev.lesson_id && isFuture) {
+    // Geçmişte yapılmış ders → gelecekteki bir tarihe taşındı:
+    // lessons kaydını sil, plan'ı "planned" durumuna döndür
+    await sb.from("lessons").delete().eq("id", ev.lesson_id);
+    if (ev.plan_id) {
+      await sb.from("planned")
+        .update({ lesson_date: newDate, lesson_time: newTime, weekday, status: "planned", materialized_lesson_id: null })
+        .eq("id", ev.plan_id);
+      if (scope === "one") await leaveTombstone(sb, ev, newDate);
+    }
+  } else {
+    if (ev.lesson_id) {
+      await sb.from("lessons").update({ lesson_date: newDate, lesson_time: newTime }).eq("id", ev.lesson_id);
+    }
+    if (ev.plan_id) {
+      await sb.from("planned").update({ lesson_date: newDate, lesson_time: newTime, weekday }).eq("id", ev.plan_id);
+      if (scope === "one") await leaveTombstone(sb, ev, newDate);
+    }
+  }
+
+  await propagateRecurringChange(sb, ev, { date: newDate, time: newTime }, scope);
+}
+
+// ============ DERSLER / RAPORLAR listesi ============
+
+export type LessonRow = {
+  row_type: "lesson" | "planned";
+  row_id: number;
+  lesson_date: string;
+  lesson_time: string;
+  topic: string;
+  fee: number;
+  paid: boolean;
+  name: string;
+  school: string;
+  subject: string;
+};
+
+/** "Durum" (yapıldı/planlandı) ile "Ödeme" (ödendi/ödenmedi) birbirinden
+ *  bağımsızdır: bir ders henüz yapılmamış olsa bile veli peşin ödemiş
+ *  olabilir, bu yüzden planned satırları da artık kendi paid alanını taşır. */
+export async function getLessonRows(
+  sb: SupabaseClient,
+  monthText: string,
+  studentId: number | null,
+  statusFilter: "Tümü" | "Yapıldı" | "Planlandı",
+  paidFilter: "Tümü" | "Ödendi" | "Ödenmedi"
+): Promise<LessonRow[]> {
+  const rows: LessonRow[] = [];
+  const { start, end } = monthRange(monthText);
+
+  if (statusFilter !== "Planlandı") {
+    let q = sb
+      .from("lessons")
+      .select("id,lesson_date,lesson_time,topic,fee,paid,students(name,school,subject)")
+      .gte("lesson_date", start)
+      .lt("lesson_date", end);
+    if (studentId) q = q.eq("student_id", studentId);
+    if (paidFilter === "Ödendi") q = q.eq("paid", true);
+    if (paidFilter === "Ödenmedi") q = q.eq("paid", false);
+    const { data, error } = await q;
+    if (error) throw error;
+    for (const r of data || []) {
+      const s: any = (r as any).students;
+      rows.push({ row_type: "lesson", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: r.topic || "", fee: r.fee, paid: r.paid, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
+    }
+  }
+
+  if (statusFilter !== "Yapıldı") {
+    let q = sb
+      .from("planned")
+      .select("id,lesson_date,lesson_time,fee,note,paid,students(name,school,subject)")
+      .gte("lesson_date", start)
+      .lt("lesson_date", end)
+      .is("materialized_lesson_id", null)
+      .eq("status", "planned");
+    if (studentId) q = q.eq("student_id", studentId);
+    if (paidFilter === "Ödendi") q = q.eq("paid", true);
+    if (paidFilter === "Ödenmedi") q = q.eq("paid", false);
+    const { data, error } = await q;
+    if (error) throw error;
+    for (const r of data || []) {
+      const s: any = (r as any).students;
+      rows.push({ row_type: "planned", row_id: r.id, lesson_date: r.lesson_date, lesson_time: r.lesson_time, topic: (r as any).note || "", fee: r.fee, paid: (r as any).paid || false, name: s?.name || "", school: s?.school || "", subject: s?.subject || "" });
+    }
+  }
+
+  rows.sort((a, b) => (a.lesson_date + a.lesson_time + a.row_type).localeCompare(b.lesson_date + b.lesson_time + b.row_type));
+  return rows;
+}
+
+export async function updateLessonTopic(sb: SupabaseClient, lessonId: number, topic: string) {
+  await sb.from("lessons").update({ topic }).eq("id", lessonId);
+}
+
+/** Henüz gerçekleşmemiş (planlı) bir dersin konu/not alanını günceller,
+ *  böylece ay bitmeden veliye gönderilecek raporda görünebilir. */
+export async function updatePlannedTopic(sb: SupabaseClient, plannedId: number, note: string) {
+  await sb.from("planned").update({ note }).eq("id", plannedId);
+}
+
+export async function updateLessonPaid(sb: SupabaseClient, lessonId: number, paid: boolean) {
+  await sb.from("lessons").update({ paid }).eq("id", lessonId);
+}
+
+/** Henüz yapılmamış (planlı) bir dersin peşin ödenip ödenmediğini işaretler.
+ *  Ders zamanı gelip 'lessons' tablosuna aktarıldığında (materializeDue)
+ *  bu peşin ödeme bilgisi yeni kayda aynen taşınır. */
+export async function updatePlannedPaid(sb: SupabaseClient, plannedId: number, paid: boolean) {
+  await sb.from("planned").update({ paid }).eq("id", plannedId);
+}
+
+export async function quickAddLesson(
+  sb: SupabaseClient,
+  params: { studentId: number; date: string; time: string; topic: string; fee: number; paid: boolean }
+) {
+  const { error } = await sb.from("lessons").insert({
+    student_id: params.studentId,
+    lesson_date: params.date,
+    lesson_time: params.time,
+    duration_min: DURATION_MIN,
+    topic: params.topic,
+    fee: params.fee,
+    paid: params.paid,
+    notes: "",
+  });
+  if (error) throw error;
+}
+
+// ============ AYLIK KAZANÇ GEÇMİŞİ ============
+
+export type MonthlyEarning = { monthKey: string; total: number };
+
+/** İlk plandan (uygulamanın gerçekten kullanılmaya başladığı aydan) bugüne
+ *  kadar her ayın TAHMİNİ toplam gelirini (o ay için planlanan tüm derslerin
+ *  toplam ücreti, yapılmış/yapılmamış fark etmeksizin) döner. Veri olmayan
+ *  geçmiş aylar hiç gösterilmez; yeni aylar geldikçe liste otomatik uzar. */
+export async function getMonthlyEarnings(sb: SupabaseClient): Promise<MonthlyEarning[]> {
+  const today = new Date();
+  const todayISO = toISODate(today);
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const { start: currentMonthStart, end: currentMonthEnd } = monthRange(currentMonthKey);
+
+  // İlk dersin tarihini bul (başlangıç ayı için)
+  const { data: firstLesson } = await sb.from("lessons").select("lesson_date").order("lesson_date", { ascending: true }).limit(1).maybeSingle();
+  const { data: firstPlan } = await sb.from("planned").select("lesson_date").order("lesson_date", { ascending: true }).limit(1).maybeSingle();
+  const firstDate = [firstLesson?.lesson_date, firstPlan?.lesson_date].filter(Boolean).sort()[0];
+
+  let startYear = today.getFullYear();
+  let startMonth = today.getMonth();
+  if (firstDate) {
+    const d = new Date(`${firstDate}T00:00:00`);
+    startYear = d.getFullYear();
+    startMonth = d.getMonth();
+  }
+
+  const startISO = toISODate(new Date(startYear, startMonth, 1));
+
+  // Geçmiş + bu ay yapılan dersler → lessons tablosundan
+  const { data: lessonData, error: e1 } = await sb.from("lessons").select("lesson_date, fee").gte("lesson_date", startISO);
+  // Bu ayın geri kalan planları → planned tablosundan (sadece gelecek + status=planned)
+  const { data: futureData, error: e2 } = await sb
+    .from("planned")
+    .select("lesson_date, fee")
+    .gte("lesson_date", todayISO)
+    .lt("lesson_date", currentMonthEnd)
+    .eq("status", "planned")
+    .is("materialized_lesson_id", null);
+  if (e1) throw e1;
+  if (e2) throw e2;
+
+  const totals = new Map<string, number>();
+  const cursor = new Date(startYear, startMonth, 1);
+  const endCursor = new Date(today.getFullYear(), today.getMonth(), 1);
+  while (cursor <= endCursor) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+    totals.set(key, 0);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  for (const row of [...(lessonData || []), ...(futureData || [])]) {
+    const key = row.lesson_date.slice(0, 7);
+    if (totals.has(key)) totals.set(key, (totals.get(key) || 0) + (row.fee || 0));
+  }
+
+  return Array.from(totals.entries()).map(([monthKey, total]) => ({ monthKey, total }));
+}
+
+// ============ ÖĞRENCİ DERS NOTLARI ============
+
+export type StudentLessonNote = {
+  id: number;
+  lesson_date: string;
+  lesson_time: string;
+  topic: string;
+  notes: string;
+};
+
+/** Bir öğrencinin geçmişte yapılmış derslerini (en eskiden en yeniye) döner. */
+export async function getStudentLessonHistory(sb: SupabaseClient, studentId: number): Promise<StudentLessonNote[]> {
+  const { data, error } = await sb
+    .from("lessons")
+    .select("id, lesson_date, lesson_time, topic, notes")
+    .eq("student_id", studentId)
+    .order("lesson_date", { ascending: true })
+    .order("lesson_time", { ascending: true });
+  if (error) throw error;
+  return (data || []) as StudentLessonNote[];
+}
+
+export async function updateLessonNotes(sb: SupabaseClient, lessonId: number, notes: string) {
+  const { error } = await sb.from("lessons").update({ notes }).eq("id", lessonId);
+  if (error) throw error;
+}
