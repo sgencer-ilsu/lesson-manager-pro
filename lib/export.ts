@@ -1,9 +1,9 @@
 import { money, TR_MONTHS } from "./utils";
 import type { LessonRow } from "./data";
 
-const TUTOR_NAME = "Serdar Gençer";
-const TUTOR_TITLE = "Math-Stat Öğretmeni";
-const TUTOR_PHONE = "0 505 811 93 27";
+export const TUTOR_NAME = "Serdar Gençer";
+export const TUTOR_TITLE = "Math-Stat Öğretmeni";
+export const TUTOR_PHONE = "0 505 811 93 27";
 
 function statusText(r: LessonRow) {
   return r.row_type === "planned" ? "Planlandı" : "Yapıldı";
@@ -32,7 +32,7 @@ export function exportCSV(rows: LessonRow[], filename = "ders_raporu.csv") {
   URL.revokeObjectURL(url);
 }
 
-function monthTitle(monthText: string) {
+export function monthTitle(monthText: string) {
   const [y, m] = monthText.split("-");
   const idx = parseInt(m, 10) - 1;
   return TR_MONTHS[idx] ? `${TR_MONTHS[idx]} ${y}` : monthText;

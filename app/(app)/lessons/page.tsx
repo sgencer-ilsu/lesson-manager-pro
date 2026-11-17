@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getStudents, getLessonRows, updateLessonTopic, updatePlannedTopic, updateLessonPaid, updatePlannedPaid, type LessonRow } from "@/lib/data";
 import { exportCSV, exportPDF } from "@/lib/export";
+import { exportStudentImage } from "@/lib/studentImage";
+import { TZ_OPTIONS } from "@/lib/timezones";
 import type { Student } from "@/lib/types";
 import { money, monthKey } from "@/lib/utils";
 import MonthPicker from "@/components/MonthPicker";
@@ -27,6 +29,9 @@ export default function LessonsPage() {
   const [paidFilter, setPaidFilter] = useState<"Tümü" | "Ödendi" | "Ödenmedi">("Tümü");
   const [rows, setRows] = useState<LessonRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tzKey, setTzKey] = useState("UK");
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgMsg, setImgMsg] = useState("");
 
   useEffect(() => {
     // Pasif öğrenciler de dahil: o ayki ders/ödeme geçmişini görebilmek için
@@ -77,6 +82,20 @@ export default function LessonsPage() {
   const planned = rows.filter((r) => r.row_type === "planned").reduce((a, r) => a + (r.fee || 0), 0);
   const paid = rows.filter((r) => r.paid).reduce((a, r) => a + (r.fee || 0), 0);
   const unpaid = rows.filter((r) => !r.paid).reduce((a, r) => a + (r.fee || 0), 0);
+  async function makeStudentImage() {
+    if (!studentName || rows.length === 0) return;
+    setImgBusy(true);
+    setImgMsg("");
+    try {
+      const { copied } = await exportStudentImage(rows, month, studentName, tzKey);
+      setImgMsg(copied ? "Resim indirildi ve panoya kopyalandı (WhatsApp Web'de Ctrl+V ile yapıştırabilirsin)." : "Resim indirildi.");
+    } catch (e: any) {
+      setImgMsg("Resim oluşturulamadı: " + (e?.message || "bilinmeyen hata"));
+    } finally {
+      setImgBusy(false);
+    }
+  }
+
   const studentName = studentId ? students.find((s) => s.id === studentId)?.name || null : null;
 
   return (
@@ -118,6 +137,17 @@ export default function LessonsPage() {
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Öğrenci resmi: saat dilimi</label>
+            <select className="input w-[200px]" value={tzKey} onChange={(e) => setTzKey(e.target.value)}>
+              {TZ_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex gap-2 ml-auto">
             <button className="btn-primary" onClick={filter} disabled={loading}>
               {loading ? "Filtreleniyor…" : "Filtrele"}
@@ -128,8 +158,17 @@ export default function LessonsPage() {
             <button className="btn" onClick={() => exportPDF(rows, month, studentName)}>
               PDF Kaydet
             </button>
+            <button
+              className="btn"
+              onClick={makeStudentImage}
+              disabled={imgBusy || !studentId || rows.length === 0}
+              title={!studentId ? "Resim için önce bir öğrenci seç" : "Ücretsiz, öğrencinin saatine çevrilmiş ders programı resmi (WhatsApp için)"}
+            >
+              {imgBusy ? "Hazırlanıyor…" : "Öğrenci Resmi"}
+            </button>
           </div>
         </div>
+        {imgMsg && <p className="text-xs text-muted mt-3">{imgMsg}</p>}
       </div>
 
       <div className="flex flex-wrap gap-3">
